@@ -1,0 +1,55 @@
+# Continuous Integration — validation only. This workflow never deploys to Apps Script and needs
+# no Google credentials. See docs/12_CI_CD_AND_RELEASE_PROCESS.md for what each job proves (and
+# what it does not).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Structure, syntax, secrets, unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Required files present
+        run: npm run check:structure
+
+      - name: Syntax check (server .js + inline <script> blocks in .html)
+        run: npm run check:syntax
+
+      - name: Project-specific secret patterns
+        run: npm run check:secrets
+
+      - name: Unit + contract tests
+        run: npm test
+
+  gitleaks:
+    name: Secret scan (gitleaks, full history)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.18.4 \
+            detect --source /repo --redact --verbose --exit-code 1

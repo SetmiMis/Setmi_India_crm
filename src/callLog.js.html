@@ -1,0 +1,111 @@
+<script>
+/* =====================================================
+   CALL MANAGEMENT — Call History card inside the enquiry detail modal
+   + the "Call Activity (Today)" dashboard card.
+===================================================== */
+
+// Set true once the user explicitly asks to keep logging past the default 6 for the
+// enquiry currently open in the modal. Reset whenever a (possibly different) enquiry
+// is (re)loaded — see openDetail() in modal.js.html.
+var callExtraUnlocked = false;
+
+function renderCallCard(e){
+  var calls = e.calls || [];
+  var used = calls.length;
+  var atDefault = used >= 6;
+
+  var interestColor = { 'Interested':'var(--green)', 'Not Interested':'var(--red)', 'Maybe / Thinking':'var(--gold)' };
+  var rows = calls.map(function(c){
+    var statusColor = c.CallStatus === 'Connected' ? 'var(--green)' : 'var(--red)';
+    return '<tr>'+
+      '<td><b>Call '+c.CallNumber+'</b></td>'+
+      '<td>'+esc(c.CallDate||'')+'</td>'+
+      '<td>'+esc(c.Employee||'')+'</td>'+
+      '<td style="color:'+statusColor+';font-weight:700">'+esc(c.CallStatus||'')+'</td>'+
+      '<td style="color:'+(interestColor[c.Interest]||'inherit')+';font-weight:700">'+esc(c.Interest||'—')+'</td>'+
+      '<td>'+esc(c.Remarks||'')+'</td>'+
+      '<td>'+esc(c.NextFollowUp||'—')+'</td>'+
+      '</tr>';
+  }).join('');
+
+  var table = calls.length
+    ? '<table><thead><tr><th>#</th><th>Date</th><th>Employee</th><th>Status</th><th>Interested?</th><th>Remarks</th><th>Next</th></tr></thead><tbody>'+rows+'</tbody></table>'
+    : '<div class="empty">No calls logged yet.</div>';
+
+  // Interest only makes sense once the call actually connected — hidden/reset whenever
+  // Call Status is switched away from Connected, so a "Busy"/"No Answer" call can't carry
+  // a stray interest value from before the status was changed.
+  var callForm = '<div class="grid3" style="margin-top:8px">'+
+        '<div><label>Employee</label><select id="clEmployee">'+opts(META.team, e.LeadBy)+'</select></div>'+
+        '<div><label>Call Status</label><select id="clStatus" onchange="toggleClInterest_()">'+opts(META.callStatuses)+'</select></div>'+
+        '<div><label>Next Follow-up</label><input id="clNext" type="date"></div>'+
+      '</div>'+
+      '<div id="clInterestWrap" style="margin-top:8px"><label>Customer Interested?</label>'+
+        '<select id="clInterest"><option value="">— Not asked / N-A —</option>'+opts(META.interestLevels)+'</select></div>'+
+      '<div style="margin-top:8px"><label>Remarks</label><input id="clRemarks" placeholder="What was discussed"></div>'+
+      '<div style="margin-top:8px"><button class="btn green sm" onclick="doLogCall()">Save Call</button></div>';
+
+  var form;
+  if (!atDefault){
+    form = '<div style="margin-top:10px"><b>Log Call '+(used+1)+' of 6</b>'+callForm+'</div>';
+  } else if (!callExtraUnlocked){
+    form = '<div class="sub" style="margin-top:8px">Maximum of 6 calls reached for this enquiry.</div>'+
+      '<div style="margin-top:8px"><button class="btn ghost sm" onclick="unlockExtraCall()">+ Log another call</button></div>';
+  } else {
+    form = '<div style="margin-top:10px"><b>Log Call '+(used+1)+'</b>'+callForm+'</div>';
+  }
+
+  return '<div class="card" id="callCardWrap" style="margin:10px 0;padding:14px">'+
+    '<b>📞 Call History ('+used+'/'+Math.max(6,used)+')</b>'+
+    '<div class="tablecard" style="margin-top:8px">'+table+'</div>'+
+    form+
+    '</div>';
+}
+
+function toggleClInterest_(){
+  var wrap = document.getElementById('clInterestWrap');
+  if (!wrap) return;
+  var connected = val('clStatus') === 'Connected';
+  wrap.style.display = connected ? '' : 'none';
+  if (!connected) setv('clInterest','');
+}
+
+function unlockExtraCall(){
+  callExtraUnlocked = true;
+  var wrap = document.getElementById('callCardWrap');
+  if (wrap && CURRENT) wrap.outerHTML = renderCallCard(CURRENT);
+}
+
+function doLogCall(){
+  if (!CURRENT) return;
+  var p = {
+    id: CURRENT.EnqID, customer: CURRENT.Customer,
+    employee: val('clEmployee'), callStatus: val('clStatus'), interest: val('clInterest'),
+    remarks: val('clRemarks'), nextFollowUp: val('clNext')
+  };
+  google.script.run.withSuccessHandler(function(r){
+    toast(r.msg||'Saved');
+    if (r.ok){
+      closeModal();
+      refreshAll();
+      showTab(document.querySelector('.tab[onclick*="v-fu"]'), 'v-fu');
+    }
+  }).withFailureHandler(function(err){ handleAuthError(err, 'Error: '+err.message); }).logCall(p, AUTH_TOKEN);
+}
+
+function loadCallDashboard(){
+  google.script.run.withSuccessHandler(function(d){
+    var el = document.getElementById('callKpis');
+    if (!el) return;
+    var k = [
+      { l:"📅 Today's Calls", v:d.todaysCalls||0, c:'acc' },
+      { l:'⏳ Pending Calls', v:d.pendingCalls||0, c:'today' },
+      { l:'✅ Completed Calls', v:d.completedCalls||0, c:'good' },
+      { l:'❌ Missed Calls', v:d.missedCalls||0, c:'alert' }
+    ];
+    el.innerHTML = k.map(function(x){
+      return '<div class="card kpi '+x.c+'"><div class="v">'+x.v+'</div><div class="l">'+x.l+'</div></div>';
+    }).join('');
+  }).withFailureHandler(function(err){ console.error(err); handleAuthError(err); }).getCallDashboard(AUTH_TOKEN);
+}
+</script>

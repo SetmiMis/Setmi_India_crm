@@ -1,0 +1,114 @@
+<script>
+/* =====================================================
+   OMS ORDER CARD — inside the enquiry detail modal.
+   "Record Order Details" opens the order in OMS; then this card shows its live status,
+   the PI Accounts uploaded (download -> send to customer), and lets the rep record payment.
+   Server side: OmsBridge.js.
+===================================================== */
+var OMS_PRODUCTS = null;
+
+function omsCardShell_(inner){ return '<div class="card" id="omsCardWrap" style="margin:10px 0;padding:14px">'+inner+'</div>'; }
+
+function renderOmsCard(e){
+  if (e.OMSOrderID) return omsCardShell_('<b>🧾 Order &amp; Payment (OMS)</b><div id="omsBody" class="sub" style="margin-top:8px">Loading '+esc(e.OMSOrderID)+'…</div>');
+  if (e.Stage === 'Lost') return '';
+  return omsCardShell_('<b>🧾 Order &amp; Payment (OMS)</b>'+
+    '<div class="sub" style="margin:6px 0 8px">Customer ne order confirm kar diya? Product aur quantity daalo — order OMS mein chala jayega, Accounts PI banayega.</div>'+
+    '<div id="omsBody"><button class="btn green sm" onclick="omsOpenForm_()">📝 Record Order Details</button></div>');
+}
+
+function loadOmsCard(e){
+  if (!e.OMSOrderID) return;
+  google.script.run.withSuccessHandler(function(r){ omsPaint_(r, e.EnqID); })
+    .withFailureHandler(function(err){ var b=document.getElementById('omsBody'); if(b) b.textContent='Status load nahi hua: '+(err&&err.message||err); })
+    .getOmsOrder(e.EnqID, AUTH_TOKEN);
+}
+
+var OMS_AFTER_PAYMENT_ = ['Customer Confirmed','Quantity Check','Requirement Pending','Partially Available','Ready for Packing','Packing','Final Verification','Ready for Dispatch','Dispatched','Completed'];
+
+function omsPaint_(r, enqId){
+  var b = document.getElementById('omsBody'); if (!b) return;
+  if (!r || !r.ok){ b.innerHTML = '<span style="color:var(--red)">'+esc((r&&r.msg)||'Status load nahi hua')+'</span>'; return; }
+  var st = r.status;
+  var h = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b>'+esc(r.orderId)+'</b><span class="pill">'+esc(st)+'</span></div>';
+  if (r.trackUrl){
+    var wa = 'https://wa.me/?text=' + encodeURIComponent('Aap apne order ka status yahan track kar sakte hain: ' + r.trackUrl);
+    h += '<div class="actions" style="margin-top:8px"><button class="btn ghost sm" onclick="omsCopy_(\''+esc(r.trackUrl)+'\')">🔗 Copy tracking link</button>'+
+         '<a class="btn ghost sm" target="_blank" href="'+wa+'">WhatsApp par bhejo</a></div>';
+  }
+  if (st === 'PI Requested') h += '<p class="sub" style="margin-top:8px">Accounts ko PI banane ki request bhej di gayi hai. PI upload hote hi yahan dikhegi.</p>';
+  if (r.pi && (st === 'PI Ready' || st === 'Payment Pending')){
+    h += '<div class="actions" style="margin-top:8px"><a class="btn sm" target="_blank" href="'+esc(r.pi.url)+'">⬇ Download PI</a></div>';
+  }
+  if (st === 'PI Ready'){
+    h += '<p class="sub" style="margin-top:8px">PI download karke customer ko bhejo, phir niche button dabao.</p>'+
+      '<button class="btn green sm" id="omsBtn" onclick="omsPiSent_(\''+enqId+'\')">✓ PI customer ko bhej di</button>';
+  }
+  if (st === 'Payment Pending'){
+    h += '<div class="grid3" style="margin-top:10px">'+
+      '<div><label>Amount ₹</label><input id="omsAmt" inputmode="decimal"></div>'+
+      '<div><label>UTR / Reference</label><input id="omsRef"></div>'+
+      '<div><label>Note</label><input id="omsNote" placeholder="e.g. screenshot aaya"></div></div>'+
+      '<div style="margin-top:8px"><button class="btn green sm" id="omsBtn" onclick="omsPaid_(\''+enqId+'\')">💰 Payment aa gayi</button></div>'+
+      '<p class="sub" style="margin-top:6px">Accounts bhi bank check karke yahi mark kar sakta hai.</p>';
+  }
+  if (r.payment) h += '<p class="sub" style="margin-top:8px">💰 '+esc(r.payment.note)+' — '+esc(r.payment.by)+'</p>';
+  if (OMS_AFTER_PAYMENT_.indexOf(st) > -1) h += '<p class="sub" style="margin-top:8px">Payment ho chuki hai — order ab warehouse/dispatch team ke paas hai.</p>';
+  b.innerHTML = h;
+}
+
+function omsCopy_(url){
+  var done = function(){ toast('Tracking link copy ho gaya.'); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, function(){ window.prompt('Tracking link', url); });
+  else window.prompt('Tracking link', url);
+}
+function omsPiSent_(id){
+  var btn = document.getElementById('omsBtn'); if (btn) btn.disabled = true;
+  google.script.run.withSuccessHandler(function(r){ toast(r.msg||'Done'); if (r.ok) loadOmsCard(CURRENT); else if (btn) btn.disabled = false; })
+    .withFailureHandler(function(err){ handleAuthError(err,'Failed'); }).omsMarkPiSent(id, AUTH_TOKEN);
+}
+function omsPaid_(id){
+  var p = { amount: val('omsAmt'), ref: val('omsRef'), note: val('omsNote') };
+  if (!p.amount && !p.ref){ toast('Amount ya UTR reference daalo.'); return; }
+  var btn = document.getElementById('omsBtn'); if (btn) btn.disabled = true;
+  google.script.run.withSuccessHandler(function(r){ toast(r.msg||'Done'); if (r.ok) loadOmsCard(CURRENT); else if (btn) btn.disabled = false; })
+    .withFailureHandler(function(err){ handleAuthError(err,'Failed'); }).omsRecordPayment(id, p, AUTH_TOKEN);
+}
+
+/* ---- Record Order Details form ---- */
+function omsOpenForm_(){
+  var b = document.getElementById('omsBody'); if (!b) return;
+  b.innerHTML = '<span class="spin"></span> Products load ho rahe hain…';
+  google.script.run.withSuccessHandler(function(r){
+    if (!r || !r.ok){ b.innerHTML = '<span style="color:var(--red)">'+esc((r&&r.msg)||'Product list nahi mili')+'</span>'; return; }
+    OMS_PRODUCTS = r.products || [];
+    b.innerHTML = '<div id="omsLines"></div>'+
+      '<div class="actions" style="margin-top:6px"><button class="btn ghost sm" onclick="omsAddLine_()">+ Add product</button></div>'+
+      '<div style="margin-top:8px"><label>Note (optional)</label><input id="omsOrdNote" placeholder="Delivery / special instruction"></div>'+
+      '<div style="margin-top:10px"><button class="btn green sm" id="omsSubmit" onclick="omsSubmit_()">✓ Order record karo</button></div>';
+    omsAddLine_();
+  }).withFailureHandler(function(err){ handleAuthError(err,'Failed'); }).getOmsProducts(AUTH_TOKEN);
+}
+function omsAddLine_(){
+  var wrap = document.getElementById('omsLines'); if (!wrap) return;
+  var d = document.createElement('div'); d.className = 'omsLine'; d.style.cssText = 'display:flex;gap:8px;margin-top:6px';
+  d.innerHTML = '<select style="flex:1"><option value="">— product chuno —</option>'+
+    OMS_PRODUCTS.map(function(p){ return '<option value="'+esc(p.productId)+'">'+esc(p.name)+(p.sku?' ('+esc(p.sku)+')':'')+' · '+esc(p.unit||'')+'</option>'; }).join('')+
+    '</select><input style="width:90px" inputmode="numeric" placeholder="Qty">'+
+    '<button type="button" class="btn ghost sm" title="Remove" onclick="this.parentNode.remove()">✕</button>';
+  wrap.appendChild(d);
+}
+function omsSubmit_(){
+  var items = Array.prototype.map.call(document.querySelectorAll('#omsLines .omsLine'), function(d){
+    return { productId: d.querySelector('select').value, qty: d.querySelector('input').value };
+  }).filter(function(x){ return x.productId && Number(x.qty) > 0; });
+  if (!items.length){ toast('Kam se kam ek product aur quantity daalo.'); return; }
+  var btn = document.getElementById('omsSubmit'); if (btn){ btn.disabled = true; btn.innerHTML = '<span class="spin"></span>'; }
+  google.script.run.withSuccessHandler(function(r){
+    toast(r.msg||'Done');
+    if (r.ok){ refreshAll(); openDetail(CURRENT.EnqID); }
+    else if (btn){ btn.disabled = false; btn.innerHTML = '✓ Order record karo'; }
+  }).withFailureHandler(function(err){ handleAuthError(err,'Failed'); })
+    .recordOrderToOms({ id: CURRENT.EnqID, items: items, note: val('omsOrdNote') }, AUTH_TOKEN);
+}
+</script>

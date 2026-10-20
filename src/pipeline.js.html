@@ -1,0 +1,209 @@
+<script>
+/* =====================================================
+   1. LOAD PIPELINE DATA
+===================================================== */
+var PIPE_DATA = [];
+var PIPE_TABLE = null;
+
+function getPipeTable_() {
+  if (PIPE_TABLE) return PIPE_TABLE;
+  PIPE_TABLE = new DataTable({
+    id: 'pipeTable',
+    searchable: false, // filters bar above already covers search — avoid a second, confusing search box
+    pageSize: 50,
+    pageSizeOptions: [25, 50, 100, 200],
+    emptyText: 'Koi enquiry nahi mili',
+    defaultSort: { key: 'Customer', dir: 'asc' },
+    rowKey: function(r) { return r.EnqID; },
+    columns: [
+      { key: 'Customer', label: 'Customer', sortValue: function(r){ return r.Customer||''; }, render: function(e) {
+          return '<b>'+esc(e.Customer)+'</b><div class="sub">'+esc(e.Company||'')+' · '+e.EnqID+'</div>';
+        } },
+      { key: 'Phone', label: 'Contact', render: function(e) {
+          var place = [e.City, e.State].filter(Boolean).join(', ') || (e.State ? '' : '—'); // shows State even when City is blank, and vice versa — so it's visible right in the table, not just on View
+          return esc(e.Phone||'')+'<div class="sub">'+esc(place)+'</div>';
+        } },
+      { key: 'Requirement', label: 'Requirement', render: function(e) { return esc(e.Requirement||''); } },
+      { key: 'Stage', label: 'Stage', render: function(e) {
+          return badge(e.Stage)+'<div class="sub pri-'+e.Priority+'">'+esc(e.Priority||'')+'</div>';
+        } },
+      { key: 'Source', label: 'Source / Lead By', render: function(e) {
+          return esc(e.Source)+'<div class="sub">'+esc(e.LeadBy||'')+'</div>';
+        } },
+      { key: 'LastContact', label: 'Last FU', render: function(e) { return esc(e.LastContact||'—'); } },
+      { key: 'NextFollowUp', label: 'Next FU', render: function(e) { return esc(e.NextFollowUp||'—'); } },
+      { key: 'actions', label: '', sortable: false, hideable: false, render: function(e) {
+          return '<div class="actions">'+
+            '<button class="btn sm" onclick="openDetail(\''+e.EnqID+'\')">👁 View</button>'+
+            '<button class="btn sm wa" onclick="window.open(\''+waLink(e.Phone)+'\',\'_blank\')">💬 WA</button>'+
+            '<button class="btn sm call" onclick="window.open(\''+telLink(e.Phone)+'\')">📞 Call</button>'+
+            '</div>';
+        } }
+    ],
+    bulkActions: [
+      { label: 'Export Selected', icon: '⬇️', run: function(rows) { exportPipelineRows_(rows); } }
+    ]
+  }).mount();
+  return PIPE_TABLE;
+}
+
+/* ---------- TRANSFER REQUESTS — leads proposed to the signed-in rep; shown at the top of Pipeline. */
+function transferReqRow_(e){
+  return '<div class="detrow">'+
+    '<span class="k">'+esc(e.Customer)+' · '+esc(e.Phone||'')+'<div class="sub">from '+esc(e.LeadBy)+'</div></span>'+
+    '<span class="actions">'+
+      '<button class="btn green sm" onclick="respondTransfer(\''+e.EnqID+'\',\'accept\')">Accept</button>'+
+      '<button class="btn ghost sm" onclick="respondTransfer(\''+e.EnqID+'\',\'decline\')">Decline</button>'+
+    '</span></div>';
+}
+function loadTransferRequests(){
+  google.script.run.withSuccessHandler(function(list){
+    var card = document.getElementById('transferReqCard');
+    var listEl = document.getElementById('transferReqList');
+    if (!card || !listEl) return;
+    if (!list || !list.length){ card.classList.add('hidden'); return; }
+    card.classList.remove('hidden');
+    listEl.innerHTML = list.map(transferReqRow_).join('');
+  }).getIncomingTransfers(AUTH_TOKEN);
+}
+function respondTransfer(id, action){
+  var call = action === 'accept' ? 'acceptTransfer' : 'declineTransfer';
+  google.script.run.withSuccessHandler(function(r){
+    toast(r.msg||(r.ok?'Done':'Failed'));
+    if (r.ok){ loadTransferRequests(); loadPipe(); refreshAll(); }
+  }).withFailureHandler(function(err){ handleAuthError(err, 'Failed'); })[call](id, AUTH_TOKEN);
+}
+
+function loadPipe() {
+  loadTransferRequests();
+  var f = {
+    q: val('fq'),
+    stage: val('fStage'),
+    source: val('fSource'),
+    leadBy: val('fLead'),
+    priority: val('fPriority'),
+    followupStatus: val('fFollow'),
+    city: val('fCity'),
+    state: val('fState'),
+    company: val('fCompany'),
+    dateFrom: val('fDateFrom'),
+    dateTo: val('fDateTo')
+  };
+  // A drill-through from a Dashboard KPI card that has no matching visible dropdown (e.g. "Active
+  // Pipeline" spans 3 stages at once) overrides the plain Stage dropdown value above.
+  if (PIPE_EXTRA_FILTER && PIPE_EXTRA_FILTER.stage) f.stage = PIPE_EXTRA_FILTER.stage;
+
+  const badge = document.getElementById('pipeExtraFilterBadge');
+  if (badge) {
+    if (PIPE_EXTRA_FILTER) {
+      badge.classList.remove('hidden');
+      badge.innerHTML = '<span class="pill" style="font-size:13px;padding:6px 12px">Filtered: <b>'+esc(PIPE_EXTRA_FILTER.label)+'</b> '+
+        '<a href="#" onclick="PIPE_EXTRA_FILTER=null;loadPipe();return false;" style="margin-left:6px;color:var(--red)">✕ Clear</a></span>';
+    } else {
+      badge.classList.add('hidden');
+      badge.innerHTML = '';
+    }
+  }
+
+  const pipeContainer = document.getElementById("pipeTable");
+
+  if (pipeContainer && !PIPE_TABLE) {
+    pipeContainer.innerHTML = '<div class="empty">Loading... <span class="spin"></span></div>';
+  }
+
+  google.script.run.withSuccessHandler(function(list) {
+      PIPE_DATA = list;
+      getPipeTable_().setRows(list);
+      var pipeCount = document.getElementById("pipeCount");
+      if (pipeCount) pipeCount.innerHTML = "Showing " + list.length + " Enquiries";
+  }).withFailureHandler(function(error) {
+      console.error("Backend Error:", error);
+      if (handleAuthError(error)) return;
+      if (pipeContainer) pipeContainer.innerHTML = '<div class="empty">Error loading pipeline</div>';
+  }).getPipeline(f, AUTH_TOKEN);
+}
+
+/* =====================================================
+   2. PIPELINE EXPORT TO CSV
+===================================================== */
+var PIPE_CSV_HEADER_ = ['Customer','Company','EnqID','Phone','City','Requirement','Stage','Priority','Source','LeadBy','LastFollowUp','NextFollowUp','DispatchDate','TransportDocket','TotalWeightKg'];
+function pipeCsvRow_(vals) {
+  return vals.map(function(v){
+    var s = String(v==null?'':v).replace(/(\r\n|\n|\r)/gm, " | ").replace(/"/g, '""');
+    return '"'+s+'"';
+  }).join(",");
+}
+function downloadPipelineCsv_(rows, filenameSuffix) {
+  var csv = [pipeCsvRow_(PIPE_CSV_HEADER_)];
+  rows.forEach(function(e) {
+    csv.push(pipeCsvRow_([e.Customer, e.Company, e.EnqID, e.Phone, e.City, e.Requirement, e.Stage, e.Priority,
+      e.Source, e.LeadBy, e.LastContact, e.NextFollowUp, e.DispatchDate, e.DispatchInfo, e.ShipmentWeight]));
+  });
+
+  var csvFile = new Blob([csv.join("\n")], {type: "text/csv"});
+  var downloadLink = document.createElement("a");
+  var dateStr = new Date().toISOString().slice(0, 10);
+  downloadLink.download = "Pipeline_Export_" + dateStr + filenameSuffix + ".csv";
+  downloadLink.href = window.URL.createObjectURL(csvFile);
+  downloadLink.style.display = "none";
+  document.body.appendChild(downloadLink);
+  downloadLink.click();
+  document.body.removeChild(downloadLink);
+
+  toast("CSV Export downloaded! 📊 (" + rows.length + " rows)");
+}
+function exportPipeline() {
+  if (!PIPE_DATA.length) { toast("No data to export!"); return; }
+  downloadPipelineCsv_(PIPE_DATA, "");
+}
+function exportPipelineRows_(rows) {
+  if (!rows.length) { toast("No rows selected!"); return; }
+  downloadPipelineCsv_(rows, "_Selected");
+}
+
+/* =====================================================
+   3. PIPELINE PRINT TABLE
+===================================================== */
+function printPipeline() {
+  if (!PIPE_DATA.length) {
+    toast("No data to print!");
+    return;
+  }
+
+  var rows = PIPE_DATA.map(function(e) {
+    return '<tr>'+
+      '<td><b>'+esc(e.Customer)+'</b><div class="sub">'+esc(e.Company||'')+' · '+e.EnqID+'</div></td>'+
+      '<td>'+esc(e.Phone||'')+'<div class="sub">'+esc(e.City||'')+'</div></td>'+
+      '<td>'+esc(e.Requirement||'')+'</td>'+
+      '<td>'+esc(e.Stage)+'<div class="sub">'+esc(e.Priority||'')+'</div></td>'+
+      '<td>'+esc(e.Source)+'<div class="sub">'+esc(e.LeadBy||'')+'</div></td>'+
+      '<td>'+esc(e.LastContact||'—')+'</td>'+
+      '<td>'+esc(e.NextFollowUp||'—')+'</td>'+
+      '</tr>';
+  }).join('');
+  var tableHTML = '<table><thead><tr><th>Customer</th><th>Contact</th><th>Requirement</th><th>Stage</th>'+
+    '<th>Source / Lead By</th><th>Last FU</th><th>Next FU</th></tr></thead><tbody>'+rows+'</tbody></table>';
+
+  var printWindow = window.open('', '', 'height=800,width=1000');
+  printWindow.document.write('<html><head><title>Print Pipeline</title>');
+  printWindow.document.write('<style>');
+  printWindow.document.write('body { font-family: Arial, sans-serif; padding: 20px; color: #333; }');
+  printWindow.document.write('h2 { color: #0b86ac; margin-bottom: 5px; }');
+  printWindow.document.write('table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 15px; }');
+  printWindow.document.write('th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: left; vertical-align: top; }');
+  printWindow.document.write('th { background-color: #f4f8fa; font-weight: bold; text-transform: uppercase; }');
+  printWindow.document.write('.sub { color: #666; font-size: 10px; margin-top: 3px; display:block; }');
+  printWindow.document.write('</style></head><body>');
+
+  printWindow.document.write('<h2>SETMI INDIA - Sales Pipeline</h2>');
+  printWindow.document.write('<p style="color:#777; font-size:12px;">Printed on: ' + new Date().toLocaleString() + ' · ' + PIPE_DATA.length + ' rows</p>');
+  printWindow.document.write(tableHTML);
+
+  printWindow.document.write('</body></html>');
+  printWindow.document.close();
+
+  setTimeout(function() {
+    printWindow.print();
+  }, 250);
+}
+</script>

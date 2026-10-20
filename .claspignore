@@ -1,0 +1,5 @@
+# Only the Apps Script project files under src/ are pushed (rootDir is "src" in .clasp.json).
+**/**
+!*.js
+!*.html
+!appsscript.json

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+<?!= include('css'); ?>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo" style="margin:6px 0 4px">SETMI <span class="in">INDIA</span></div>
+  <div id="v-an" class="view active"></div>
+</div>
+<script>window.AN_SHARE = <?!= JSON.stringify(key) ?>;</script>
+<?!= include('utils.js'); ?>
+<script>
+// Public share page has no login, so a failed load just shows the message under the title.
+function handleAuthError(err, msg){ var s = document.getElementById('anSub'); if (s) s.textContent = msg + ': ' + (err && err.message || err); return true; }
+</script>
+<?!= include('analysis.js'); ?>
+<script>loadAnalysis();</script>
+</body>
+</html>

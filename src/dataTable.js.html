@@ -1,0 +1,294 @@
+<script>
+/* =====================================================
+   GENERIC DATA TABLE COMPONENT
+   Sortable / searchable / paginated table with column-visibility
+   toggle (persisted per-table in localStorage) and optional bulk
+   row actions. Renders its full markup into a single container div
+   each time — same "rebuild the innerHTML" pattern as the rest of
+   this app, just factored out so every list view doesn't hand-roll
+   its own sorting/paging/selection logic.
+
+   Usage:
+     var t = new DataTable({
+       id: 'pipeTable',                 // an existing container element's id
+       columns: [
+         { key:'Customer', label:'Customer', render:function(r){ return '<b>'+esc(r.Customer)+'</b>'; } },
+         { key:'Stage', label:'Stage', sortable:true }
+       ],
+       rows: [...],
+       rowKey: function(r){ return r.EnqID; },
+       bulkActions: [{ label:'Export Selected', run:function(rows, dt){ ... } }]
+     }).mount();
+     ...
+     t.setRows(newRows);                // swap data, keeps sort/columns, resets page+selection
+===================================================== */
+(function(){
+  var REGISTRY = {};
+
+  function loadHiddenCols(id){
+    try { return JSON.parse(localStorage.getItem('dt_hidden_'+id) || '[]'); } catch(e){ return []; }
+  }
+  function saveHiddenCols(id, arr){
+    try { localStorage.setItem('dt_hidden_'+id, JSON.stringify(arr)); } catch(e){}
+  }
+
+  function DataTable(config){
+    this.id = config.id;
+    this.columns = config.columns || [];
+    this.rowKey = config.rowKey || function(r,i){ return r.id!=null ? r.id : i; };
+    this.pageSizeOptions = config.pageSizeOptions || [25,50,100];
+    this.pageSize = config.pageSize || this.pageSizeOptions[0];
+    this.searchable = config.searchable !== false;
+    this.searchPlaceholder = config.searchPlaceholder || 'Search…';
+    this.searchKeys = config.searchKeys || null;
+    this.bulkActions = config.bulkActions || [];
+    this.emptyText = config.emptyText || 'No records found';
+    this.rows = config.rows || [];
+    this.onRowsChange = config.onRowsChange || null;
+
+    var hidden = loadHiddenCols(this.id);
+    this.columns.forEach(function(c){ c.hidden = c.hideable !== false && hidden.indexOf(c.key) > -1; });
+
+    this.sortKey = (config.defaultSort && config.defaultSort.key) || null;
+    this.sortDir = (config.defaultSort && config.defaultSort.dir) || 'asc';
+    this.page = 1;
+    this.query = '';
+    this.selected = {};
+    this.colMenuOpen = false;
+
+    REGISTRY[this.id] = this;
+  }
+
+  DataTable.prototype.mount = function(){ this.render(); return this; };
+
+  DataTable.prototype.setRows = function(rows){
+    this.rows = rows || [];
+    this.page = 1;
+    this.selected = {};
+    this.render();
+  };
+
+  DataTable.prototype.getSelectedRows = function(){
+    var self = this;
+    return this.rows.filter(function(r,i){ return !!self.selected[self.rowKey(r,i)]; });
+  };
+
+  DataTable.prototype.visibleColumns = function(){
+    return this.columns.filter(function(c){ return !c.hidden; });
+  };
+
+  DataTable.prototype.filteredSorted = function(){
+    var self = this;
+    var rows = this.rows;
+    if (this.searchable && this.query){
+      var q = this.query.toLowerCase();
+      var keys = this.searchKeys || this.columns.map(function(c){ return c.key; });
+      rows = rows.filter(function(r){
+        return keys.some(function(k){
+          var v = r[k];
+          return v != null && String(v).toLowerCase().indexOf(q) > -1;
+        });
+      });
+    }
+    if (this.sortKey){
+      var col = this.columns.filter(function(c){ return c.key === self.sortKey; })[0];
+      var dir = this.sortDir === 'desc' ? -1 : 1;
+      rows = rows.slice().sort(function(a,b){
+        var av = col && col.sortValue ? col.sortValue(a) : a[self.sortKey];
+        var bv = col && col.sortValue ? col.sortValue(b) : b[self.sortKey];
+        if (av == null) av = '';
+        if (bv == null) bv = '';
+        if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+        return String(av).localeCompare(String(bv), undefined, {numeric:true, sensitivity:'base'}) * dir;
+      });
+    }
+    return rows;
+  };
+
+  DataTable.prototype.sort = function(key){
+    var col = this.columns.filter(function(c){ return c.key === key; })[0];
+    if (!col || col.sortable === false) return;
+    if (this.sortKey === key) this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+    else { this.sortKey = key; this.sortDir = 'asc'; }
+    this.page = 1;
+    this.render();
+  };
+
+  DataTable.prototype.search = function(q){
+    this.query = q;
+    this.page = 1;
+    this.render();
+  };
+
+  DataTable.prototype.toggleCol = function(key){
+    var col = this.columns.filter(function(c){ return c.key === key; })[0];
+    if (!col) return;
+    col.hidden = !col.hidden;
+    saveHiddenCols(this.id, this.columns.filter(function(c){ return c.hidden; }).map(function(c){ return c.key; }));
+    this.render();
+  };
+
+  DataTable.prototype.toggleColMenu = function(){
+    this.colMenuOpen = !this.colMenuOpen;
+    this.render();
+  };
+
+  DataTable.prototype.goPage = function(n){
+    this.page = n;
+    this.render();
+  };
+
+  DataTable.prototype.setPageSize = function(n){
+    this.pageSize = Number(n) || this.pageSize;
+    this.page = 1;
+    this.render();
+  };
+
+  DataTable.prototype.selectRow = function(key, checked){
+    if (checked) this.selected[key] = true; else delete this.selected[key];
+    this.render();
+  };
+
+  DataTable.prototype.selectPage = function(checked){
+    var self = this;
+    (this._pageRows || []).forEach(function(r,i){
+      var k = self.rowKey(r,i);
+      if (checked) self.selected[k] = true; else delete self.selected[k];
+    });
+    this.render();
+  };
+
+  DataTable.prototype.clearSelection = function(){
+    this.selected = {};
+    this.render();
+  };
+
+  DataTable.prototype.runBulk = function(idx){
+    var action = this.bulkActions[idx];
+    if (!action) return;
+    var rows = this.getSelectedRows();
+    if (!rows.length) return;
+    action.run(rows, this);
+  };
+
+  DataTable.prototype.render = function(){
+    var self = this;
+    var el = document.getElementById(this.id);
+    if (!el) return;
+
+    var filtered = this.filteredSorted();
+    var totalPages = Math.max(1, Math.ceil(filtered.length / this.pageSize));
+    if (this.page > totalPages) this.page = totalPages;
+    var start = (this.page - 1) * this.pageSize;
+    var pageRows = filtered.slice(start, start + this.pageSize);
+    this._pageRows = pageRows;
+
+    var visCols = this.visibleColumns();
+    var selectable = this.bulkActions.length > 0;
+    var selectedCount = Object.keys(this.selected).length;
+    var hideableCols = this.columns.filter(function(c){ return c.hideable !== false; });
+
+    /* Toolbar: search box + column-visibility menu */
+    var toolbar = '';
+    if (this.searchable || hideableCols.length){
+      toolbar += '<div class="dt-toolbar">';
+      toolbar += this.searchable
+        ? '<div class="dt-search"><input placeholder="'+esc(this.searchPlaceholder)+'" value="'+esc(this.query)+'" oninput="dtSearch(\''+this.id+'\',this.value)"></div>'
+        : '<div></div>';
+      if (hideableCols.length){
+        toolbar += '<div class="dt-tools">'+
+          '<button type="button" class="btn ghost sm dt-colbtn" onclick="dtToggleColMenu(\''+this.id+'\')">⚙ Columns</button>'+
+          '<div class="dt-colmenu'+(this.colMenuOpen ? ' open' : '')+'">'+
+            hideableCols.map(function(c){
+              return '<label><input type="checkbox" '+(c.hidden ? '' : 'checked')+' onchange="dtToggleCol(\''+self.id+'\',\''+c.key+'\')">'+esc(c.label)+'</label>';
+            }).join('') +
+          '</div></div>';
+      }
+      toolbar += '</div>';
+    }
+
+    /* Bulk action bar — only shown once something is selected */
+    var bulkbar = '';
+    if (selectable && selectedCount){
+      bulkbar = '<div class="dt-bulkbar"><span>'+selectedCount+' selected</span><div class="grow">'+
+        this.bulkActions.map(function(a,i){
+          return '<button type="button" class="btn sm '+(a.className || 'ghost')+'" onclick="dtBulkAction(\''+self.id+'\','+i+')">'+(a.icon || '')+' '+esc(a.label)+'</button>';
+        }).join('') +
+        '<button type="button" class="btn ghost sm" onclick="dtClearSelection(\''+self.id+'\')">✕ Clear</button>'+
+        '</div></div>';
+    }
+
+    var allOnPageSelected = pageRows.length > 0 && pageRows.every(function(r,i){ return self.selected[self.rowKey(r,i)]; });
+    var theadCells = (selectable ? '<th class="dt-checkbox-col"><input type="checkbox" '+(allOnPageSelected ? 'checked' : '')+' onchange="dtSelectPage(\''+this.id+'\',this.checked)"></th>' : '') +
+      visCols.map(function(c){
+        var sortable = c.sortable !== false;
+        var active = self.sortKey === c.key;
+        var arrow = active ? (self.sortDir === 'asc' ? '▲' : '▼') : '↕';
+        return '<th'+(sortable ? ' class="dt-th-sort'+(active ? ' active' : '')+'" onclick="dtSort(\''+self.id+'\',\''+c.key+'\')"' : '')+'>'+esc(c.label)+(sortable ? ' <span class="arrow">'+arrow+'</span>' : '')+'</th>';
+      }).join('');
+
+    var bodyRows;
+    if (!pageRows.length){
+      bodyRows = '<tr><td colspan="'+(visCols.length + (selectable ? 1 : 0))+'"><div class="empty">'+esc(this.emptyText)+'</div></td></tr>';
+    } else {
+      bodyRows = pageRows.map(function(r,i){
+        var key = self.rowKey(r,i);
+        var cb = selectable ? '<td class="dt-checkbox-col"><input type="checkbox" '+(self.selected[key] ? 'checked' : '')+' onchange="dtSelectRow(\''+self.id+'\',\''+key+'\',this.checked)"></td>' : '';
+        var cells = visCols.map(function(c){
+          return '<td>'+(c.render ? c.render(r) : esc(r[c.key]))+'</td>';
+        }).join('');
+        return '<tr>'+cb+cells+'</tr>';
+      }).join('');
+    }
+
+    var table = '<div class="tablecard dt-scroll"><table><thead><tr>'+theadCells+'</tr></thead><tbody>'+bodyRows+'</tbody></table></div>';
+
+    var pagination = '';
+    if (filtered.length){
+      pagination = '<div class="dt-pagination">'+
+        '<span class="sub">Showing '+(start+1)+'–'+Math.min(start+this.pageSize, filtered.length)+' of '+filtered.length+'</span>'+
+        '<span>'+
+        '<button type="button" class="btn ghost sm" '+(this.page<=1?'disabled':'')+' onclick="dtGoPage(\''+this.id+'\','+(this.page-1)+')">‹ Prev</button> '+
+        '<span class="sub" style="margin:0 6px">Page '+this.page+' of '+totalPages+'</span>'+
+        '<button type="button" class="btn ghost sm" '+(this.page>=totalPages?'disabled':'')+' onclick="dtGoPage(\''+this.id+'\','+(this.page+1)+')">Next ›</button>'+
+        '</span>'+
+        (this.pageSizeOptions.length > 1 ? '<span class="dt-pagesize"><select onchange="dtPageSize(\''+this.id+'\',this.value)">'+
+          this.pageSizeOptions.map(function(n){ return '<option value="'+n+'" '+(n===self.pageSize?'selected':'')+'>'+n+' / page</option>'; }).join('')+
+          '</select></span>' : '')+
+        '</div>';
+    }
+
+    el.innerHTML = '<div class="dt-wrap">'+toolbar+bulkbar+table+pagination+'</div>';
+
+    if (this.onRowsChange) this.onRowsChange(filtered);
+  };
+
+  /* Global bridge functions — inline on* handlers can't close over the instance, so they
+     look it up in the registry by container id instead. */
+  window.dtSort = function(id,key){ REGISTRY[id] && REGISTRY[id].sort(key); };
+  window.dtSearch = function(id,q){ REGISTRY[id] && REGISTRY[id].search(q); };
+  window.dtToggleCol = function(id,key){ REGISTRY[id] && REGISTRY[id].toggleCol(key); };
+  window.dtToggleColMenu = function(id){ REGISTRY[id] && REGISTRY[id].toggleColMenu(); };
+  window.dtGoPage = function(id,n){ REGISTRY[id] && REGISTRY[id].goPage(Number(n)); };
+  window.dtPageSize = function(id,n){ REGISTRY[id] && REGISTRY[id].setPageSize(n); };
+  window.dtSelectRow = function(id,key,checked){ REGISTRY[id] && REGISTRY[id].selectRow(key, checked); };
+  window.dtSelectPage = function(id,checked){ REGISTRY[id] && REGISTRY[id].selectPage(checked); };
+  window.dtClearSelection = function(id){ REGISTRY[id] && REGISTRY[id].clearSelection(); };
+  window.dtBulkAction = function(id,idx){ REGISTRY[id] && REGISTRY[id].runBulk(idx); };
+
+  window.DataTable = DataTable;
+
+  // Close an open column-visibility menu when clicking outside its table.
+  document.addEventListener('click', function(e){
+    Object.keys(REGISTRY).forEach(function(id){
+      var dt = REGISTRY[id];
+      if (!dt.colMenuOpen) return;
+      var btn = e.target.closest ? e.target.closest('.dt-colbtn') : null;
+      var menu = e.target.closest ? e.target.closest('.dt-colmenu') : null;
+      var wrap = document.getElementById(id);
+      if (btn || menu) return; // let the toggle handler / checkbox clicks manage their own state
+      if (wrap && !wrap.contains(e.target)) { dt.colMenuOpen = false; dt.render(); }
+    });
+  });
+})();
+</script>

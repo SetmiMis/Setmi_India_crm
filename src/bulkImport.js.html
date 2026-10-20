@@ -1,0 +1,261 @@
+<script>
+/* =====================================================
+   BULK IMPORT FROM CSV / EXCEL — no AI involved: SheetJS parses the file entirely in the
+   browser (lazy-loaded only when this feature is actually used), the user maps columns to
+   name/company/phone/requirement/quantity, can drop any rows they don't want, then imports.
+===================================================== */
+var SHEETJS_READY = false;
+function loadSheetJs_(cb){
+  if (SHEETJS_READY && window.XLSX){ cb(); return; }
+  var s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+  s.onload = function(){ SHEETJS_READY = true; cb(); };
+  s.onerror = function(){ toast('Could not load the file-reading library — check your internet connection'); };
+  document.head.appendChild(s);
+}
+
+function downloadBulkTemplate(){
+  var header = ['Name','Company','Phone','Requirement','Quantity'];
+  var example = ['Rajesh Kumar','Apex Electricals','9811000001','SP-series IP68 connectors','200'];
+  var csvRow = function(vals){
+    return vals.map(function(v){
+      var s = String(v==null?'':v).replace(/(\r\n|\n|\r)/gm, ' | ').replace(/"/g, '""');
+      return '"'+s+'"';
+    }).join(',');
+  };
+  var csv = [csvRow(header), csvRow(example)].join('\n');
+  var blob = new Blob([csv], {type:'text/csv'});
+  var link = document.createElement('a');
+  link.download = 'Bulk_Import_Template.csv';
+  link.href = window.URL.createObjectURL(blob);
+  link.style.display = 'none';
+  document.body.appendChild(link); link.click(); document.body.removeChild(link);
+}
+
+var BULK_HEADERS = [];
+var BULK_ROWS = []; // array of raw row arrays, mutable — rows can be removed from the preview
+var BULK_GUESS = {};
+
+// Checks keyword tiers in priority order across ALL headers before falling back to a looser tier —
+// e.g. "Contact Name" should win over "Company Name" for the Name field even though both contain "name".
+function guessBulkColumn_(headers, keywordTiers){
+  for (var t=0; t<keywordTiers.length; t++){
+    for (var i=0; i<headers.length; i++){
+      var h = String(headers[i]||'').toLowerCase();
+      for (var j=0; j<keywordTiers[t].length; j++){
+        if (h.indexOf(keywordTiers[t][j]) >= 0) return i;
+      }
+    }
+  }
+  return -1;
+}
+
+// Per-row overrides for Priority/Remark, parallel to BULK_ROWS by index — kept separate from the
+// raw spreadsheet row since a source file usually has no Priority/Remark column of its own. An
+// empty priority means "use the batch default" selected above the table.
+var BULK_ROW_META = [];
+
+function resetBulkImport_(){
+  BULK_HEADERS = []; BULK_ROWS = []; BULK_GUESS = {}; BULK_ROW_META = [];
+  setv('bulkFile', '');
+  var wrap = document.getElementById('bulkColumnMap');
+  if (wrap) wrap.innerHTML = '';
+}
+
+function handleBulkFileSelect(input){
+  var file = input.files && input.files[0];
+  if (!file){ resetBulkImport_(); return; }
+
+  var wrap = document.getElementById('bulkColumnMap');
+  if (wrap) wrap.innerHTML = '<div class="empty">Reading file… <span class="spin"></span></div>';
+
+  loadSheetJs_(function(){
+    var reader = new FileReader();
+    reader.onload = function(e){
+      try{
+        var data = new Uint8Array(e.target.result);
+        var wb = XLSX.read(data, {type:'array'});
+        var sheet = wb.Sheets[wb.SheetNames[0]];
+        var rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+        rows = rows.filter(function(r){ return r.some(function(c){ return String(c||'').trim(); }); });
+        if (!rows.length){ toast('No data found in this file'); resetBulkImport_(); return; }
+
+        BULK_HEADERS = rows[0].map(function(h){ return String(h||'').trim(); });
+        BULK_ROWS = rows.slice(1);
+        BULK_ROW_META = BULK_ROWS.map(function(){ return {priority:'', remark:''}; });
+        BULK_GUESS = {
+          name: guessBulkColumn_(BULK_HEADERS, [['contact name','contact person','customer name','person name'], ['name']]),
+          company: guessBulkColumn_(BULK_HEADERS, [['company name','business name','firm name'], ['company','business','firm']]),
+          phone: guessBulkColumn_(BULK_HEADERS, [['mobile','phone','contact no','contact number','whatsapp']]),
+          requirement: guessBulkColumn_(BULK_HEADERS, [['product','requirement','query','item','description']]),
+          quantity: guessBulkColumn_(BULK_HEADERS, [['qty','quantity','unit']])
+        };
+        renderBulkPreview_();
+      } catch(err){
+        toast('Could not read this file: '+err.message);
+        resetBulkImport_();
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function renderBulkPreview_(){
+  var wrap = document.getElementById('bulkColumnMap');
+  if (!wrap) return;
+
+  var colOpts = '<option value="-1">— None —</option>' + BULK_HEADERS.map(function(h,i){
+    return '<option value="'+i+'">'+esc(h||('Column '+(i+1)))+'</option>';
+  }).join('');
+  function fieldRow(id, label){
+    return '<div><label>'+label+'</label><select id="'+id+'" onchange="renderBulkRowsTable_()">'+colOpts+'</select></div>';
+  }
+
+  wrap.innerHTML =
+    '<div class="sub" style="margin-bottom:8px">'+BULK_ROWS.length+' row(s) found. Match each column, remove any rows you don\'t want, then import.</div>'+
+    '<div class="grid3">'+ fieldRow('bcName','Name') + fieldRow('bcCompany','Company') + fieldRow('bcPhone','Phone') + '</div>'+
+    '<div class="grid2" style="margin-top:8px">'+ fieldRow('bcRequirement','Requirement') + fieldRow('bcQuantity','Quantity') + '</div>'+
+    '<div class="sub" style="margin-top:14px">Applied to every row in this batch — a spreadsheet export usually has no Source/Priority/Lead By column of its own. Priority can be overridden per row in the table below.</div>'+
+    '<div class="grid3" style="margin-top:6px">'+
+      '<div><label>Source</label><select id="bcSource">'+opts(META.sources)+'</select></div>'+
+      '<div><label>Priority</label><select id="bcPriority">'+opts(META.priorities,'Warm')+'</select></div>'+
+      '<div><label>Lead By</label><select id="bcLeadBy">'+opts(META.team)+'</select></div>'+
+    '</div>'+
+    '<div class="tablecard" id="bulkRowsTable" style="margin-top:12px;height:280px"></div>'+
+    '<div style="margin-top:10px"><button class="btn green sm" id="bulkImportBtn" onclick="importBulkRows()">Import Leads</button></div>';
+
+  setv('bcName', BULK_GUESS.name);
+  setv('bcCompany', BULK_GUESS.company);
+  setv('bcPhone', BULK_GUESS.phone);
+  setv('bcRequirement', BULK_GUESS.requirement);
+  setv('bcQuantity', BULK_GUESS.quantity);
+
+  renderBulkRowsTable_();
+}
+
+var BULK_EDIT_IDX = -1; // index of the row currently in inline-edit mode, or -1 for none
+
+function renderBulkRowsTable_(){
+  var el = document.getElementById('bulkRowsTable');
+  var btn = document.getElementById('bulkImportBtn');
+  if (!el) return;
+
+  if (btn) btn.innerHTML = 'Import '+BULK_ROWS.length+' Lead'+(BULK_ROWS.length===1?'':'s');
+  if (!BULK_ROWS.length){ el.innerHTML = '<div class="empty">All rows removed</div>'; return; }
+
+  var nameCol = Number(val('bcName')), companyCol = Number(val('bcCompany')), phoneCol = Number(val('bcPhone')),
+      reqCol = Number(val('bcRequirement')), qtyCol = Number(val('bcQuantity'));
+  var cell = function(r, col){ return col>=0 ? esc(String(r[col]||'')) : '—'; };
+  // Only a mapped column has somewhere in the raw row to write an edit back to — an unmapped
+  // field (col===-1) stays a plain '—' since there's no cell in this row to hold the edit.
+  var editCell = function(id, r, col){
+    return col>=0 ? '<input id="'+id+'" value="'+esc(String(r[col]||''))+'">' : '—';
+  };
+  // Priority/Remark live directly on BULK_ROW_META, independent of column mapping, so they're
+  // always editable in place — no separate edit-mode needed, and no re-render on every keystroke
+  // (that would drop focus out of the input on each character typed).
+  var priorityCell = function(i, meta){
+    return '<select onchange="setBulkRowPriority_('+i+',this.value)">'+
+      '<option value="">Batch default</option>'+opts(META.priorities, meta.priority)+'</select>';
+  };
+  var remarkCell = function(i, meta){
+    return '<input value="'+esc(meta.remark||'')+'" placeholder="Optional" oninput="setBulkRowRemark_('+i+',this.value)">';
+  };
+
+  var rows = BULK_ROWS.map(function(r, i){
+    var meta = BULK_ROW_META[i] || (BULK_ROW_META[i] = {priority:'', remark:''});
+    if (i === BULK_EDIT_IDX){
+      return '<tr class="editing">'+
+        '<td>'+editCell('beName',r,nameCol)+'</td><td>'+editCell('beCompany',r,companyCol)+'</td>'+
+        '<td>'+editCell('bePhone',r,phoneCol)+'</td><td>'+editCell('beReq',r,reqCol)+'</td>'+
+        '<td>'+editCell('beQty',r,qtyCol)+'</td>'+
+        '<td>'+priorityCell(i,meta)+'</td><td>'+remarkCell(i,meta)+'</td>'+
+        '<td class="actions">'+
+          '<button class="btn green sm" onclick="saveBulkRowEdit_('+i+')" title="Save">✔</button>'+
+          '<button class="btn ghost sm" onclick="cancelBulkRowEdit_()" title="Cancel">✕</button>'+
+        '</td></tr>';
+    }
+    return '<tr><td>'+cell(r,nameCol)+'</td><td>'+cell(r,companyCol)+'</td><td>'+cell(r,phoneCol)+'</td>'+
+      '<td>'+cell(r,reqCol)+'</td><td>'+cell(r,qtyCol)+'</td>'+
+      '<td>'+priorityCell(i,meta)+'</td><td>'+remarkCell(i,meta)+'</td>'+
+      '<td class="actions">'+
+        '<button class="btn ghost sm" onclick="editBulkRow_('+i+')" title="Edit this row">✏</button>'+
+        '<button class="btn ghost sm" onclick="removeBulkRow_('+i+')" title="Remove this row">🗑</button>'+
+      '</td></tr>';
+  }).join('');
+  el.innerHTML = '<table><thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Requirement</th><th>Qty</th>'+
+    '<th>Priority</th><th>Remark</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>';
+}
+
+function setBulkRowPriority_(idx, v){ if (BULK_ROW_META[idx]) BULK_ROW_META[idx].priority = v; }
+function setBulkRowRemark_(idx, v){ if (BULK_ROW_META[idx]) BULK_ROW_META[idx].remark = v; }
+
+function editBulkRow_(idx){
+  BULK_EDIT_IDX = idx;
+  renderBulkRowsTable_();
+}
+
+function cancelBulkRowEdit_(){
+  BULK_EDIT_IDX = -1;
+  renderBulkRowsTable_();
+}
+
+function saveBulkRowEdit_(idx){
+  var nameCol = Number(val('bcName')), companyCol = Number(val('bcCompany')), phoneCol = Number(val('bcPhone')),
+      reqCol = Number(val('bcRequirement')), qtyCol = Number(val('bcQuantity'));
+  var r = BULK_ROWS[idx];
+  if (!r) return;
+  if (nameCol>=0) r[nameCol] = val('beName');
+  if (companyCol>=0) r[companyCol] = val('beCompany');
+  if (phoneCol>=0) r[phoneCol] = val('bePhone');
+  if (reqCol>=0) r[reqCol] = val('beReq');
+  if (qtyCol>=0) r[qtyCol] = val('beQty');
+  BULK_EDIT_IDX = -1;
+  renderBulkRowsTable_();
+}
+
+function removeBulkRow_(idx){
+  if (BULK_EDIT_IDX === idx) BULK_EDIT_IDX = -1;
+  BULK_ROWS.splice(idx, 1);
+  BULK_ROW_META.splice(idx, 1);
+  renderBulkRowsTable_();
+}
+
+function importBulkRows(){
+  if (!BULK_ROWS.length){ toast('No rows to import'); return; }
+  var nameCol = Number(val('bcName')), phoneCol = Number(val('bcPhone'));
+  if (nameCol < 0 && phoneCol < 0){ toast('Map at least the Name or Phone column'); return; }
+  var companyCol = Number(val('bcCompany')), reqCol = Number(val('bcRequirement')), qtyCol = Number(val('bcQuantity'));
+  var source = val('bcSource'), priority = val('bcPriority'), leadBy = val('bcLeadBy');
+
+  var leads = BULK_ROWS.map(function(r, i){
+    var meta = BULK_ROW_META[i] || {};
+    return {
+      name: nameCol>=0 ? String(r[nameCol]||'').trim() : '',
+      company: companyCol>=0 ? String(r[companyCol]||'').trim() : '',
+      phone: phoneCol>=0 ? String(r[phoneCol]||'').trim() : '',
+      requirement: reqCol>=0 ? String(r[reqCol]||'').trim() : '',
+      quantity: qtyCol>=0 ? String(r[qtyCol]||'').trim() : '',
+      source: source,
+      priority: meta.priority || priority, // per-row override, else the batch default above the table
+      leadBy: leadBy,
+      remark: meta.remark || ''
+    };
+  }).filter(function(l){ return l.name || l.phone; });
+
+  if (!leads.length){ toast('No valid rows to import — each needs a Name or Phone'); return; }
+
+  var btn = document.getElementById('bulkImportBtn');
+  function fail(msg){ if (btn){ btn.disabled = false; btn.innerHTML = 'Import '+BULK_ROWS.length+' Leads'; } toast(msg); }
+  if (btn){ btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Importing…'; }
+
+  google.script.run.withSuccessHandler(function(r){
+    toast(r.msg);
+    if (r.ok){
+      resetBulkImport_();
+      refreshAll();
+      showTab(document.querySelector('.tab[onclick*="v-pend"]'), 'v-pend');
+    } else { fail(r.msg||'Import failed'); }
+  }).withFailureHandler(function(err){ if (handleAuthError(err)) return; fail('Error: '+err.message); }).submitBulkPendingFromRows(leads, AUTH_TOKEN);
+}
+</script>

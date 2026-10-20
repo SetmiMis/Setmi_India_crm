@@ -1,0 +1,389 @@
+<script>
+/* DATA ANALYSIS tab — rows come from getAnalysis(); filtering/aggregation is all client-side.
+   Row: see Analysis.js. Admins see every enquiry, reps only their own (enforced server-side). */
+var AN = { rows: [], charts: {}, built: false, asOf: '', keys: {} };
+var AN_ = { MO:0, DT:1, PR:2, QT:3, ST:4, SG:5, SO:6, LB:7, P3:8, DI:9, CA:10, CN:11, IN:12, EV:13, RS:14, ID:15, RP:16 };
+var AN_COL = ['#0f9dc7','#54a737','#e0962a','#8b5cf6','#f43f5e','#3b82f6','#10b981','#94a3b8'];
+var AN_OPEN = ['New','Quoted','Follow-up'];
+var AN_SH = !!window.AN_SHARE; // public share page: marketing view, no login
+var AN_HDR = ['Month','Date','Product','Quantity','State','Stage','Source','Lead By','Pincode','District','Called','Connected','Interested','EstValue','DaysToFirstCall','DaysSinceLastTouch','EnquiriesFromSamePhone'];
+var AN_ZONES = { North:['Delhi','Haryana','Punjab','Himachal Pradesh','Uttarakhand','Uttar Pradesh','Jammu & Kashmir','Ladakh','Chandigarh'],
+  South:['Andhra Pradesh','Karnataka','Kerala','Tamil Nadu','Telangana','Puducherry'], East:['West Bengal','Odisha','Bihar','Jharkhand'],
+  West:['Maharashtra','Gujarat','Goa','Rajasthan','Dadra & Nagar Haveli and Daman & Diu'], Central:['Madhya Pradesh','Chhattisgarh'],
+  Northeast:['Assam','Arunachal Pradesh','Manipur','Meghalaya','Mizoram','Nagaland','Sikkim','Tripura'] };
+function AN_zone_(s){ for (var z in AN_ZONES) if (AN_ZONES[z].indexOf(s) >= 0) return z; return 'Other'; }
+function anWon_(r){ return r[AN_.SG]==='Won' || r[AN_.SG]==='Dispatched' || r[AN_.SG]==='Closed'; }
+function anUnits_(q){
+  var m = /(\d+)\s*[–-]\s*(\d+)/.exec(q); if (m) return (+m[1] + +m[2]) / 2;
+  m = /(\d+)\s*\+/.exec(q); return m ? m[1] * 1.5 : 30;
+}
+function anPct_(a,b){ return b ? (100*a/b).toFixed(1)+'%' : '–'; }
+function anNice_(s){ s = String(s).replace(/_/g,' '); return s.charAt(0).toUpperCase()+s.slice(1); }
+function anEl_(id){ return document.getElementById(id); }
+function anMonthLbl_(m){ if (!/^\d{4}-\d\d$/.test(m)) return m; return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m.slice(5)-1]+' '+m.slice(2,4); }
+function anYmd_(d){ var m = d.getMonth()+1, x = d.getDate(); return d.getFullYear()+'-'+(m<10?'0':'')+m+'-'+(x<10?'0':'')+x; }
+function anAdd_(d, n){ var c = new Date(d.getTime()); c.setDate(c.getDate()+n); return c; }
+function anCard_(id, title, note, cls){
+  var dl = /T$/.test(id) ? '<button class="btn ghost sm anDl" onclick="anTableCsv_(\''+id+'\',\''+title.replace(/'/g,'')+'\')">⬇ CSV</button>' : '';
+  return '<div class="card anCard '+(cls||'')+'"><div class="anCH"><h3 class="sectitle">'+title+'</h3>'+dl+'</div><div id="'+id+'"></div>'+(note?'<div class="sub anNote">'+note+'</div>':'')+'</div>';
+}
+
+function anBuild_(){
+  anEl_('v-an').innerHTML =
+  '<style>'+
+  '.anHead{display:flex;flex-wrap:wrap;justify-content:space-between;gap:14px;align-items:flex-end;margin-bottom:16px}'+
+  '.anHead h2{margin:0;font-family:"Chakra Petch";font-size:22px}'+
+  '.anFilters{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}.anFilters label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:3px}'+
+  '.anFilters select,.anFilters input{min-width:130px}'+
+  '.anHint{font-size:12px;color:var(--muted);margin:-6px 0 14px}'+
+  '.anIns{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:16px}'+
+  '.anIn{padding:14px 16px;border-radius:var(--radius);border:1px solid var(--line);background:var(--card);border-left:4px solid var(--cyan)}'+
+  '.anIn .t{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}.anIn .b{font-family:"Chakra Petch";font-size:17px;font-weight:700;margin:4px 0 2px}.anIn .s{font-size:12px;color:var(--muted)}'+
+  '#anKpis .kpi,.anKp .kpi{cursor:default}#anKpis .kpi:hover,.anKp .kpi:hover{transform:none}.anKp{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:12px}.anKp .kpi .v{font-size:24px}'+
+  '.anGrid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;margin-bottom:14px}.anCard{margin:0;min-width:0}.s12{grid-column:span 12}.s8{grid-column:span 8}.s6{grid-column:span 6}.s4{grid-column:span 4}'+
+  '@media(max-width:900px){.s8,.s6,.s4{grid-column:span 12}}'+
+  '.anCH{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}.anCard .sectitle{margin:0}.anDl{padding:3px 9px;font-size:11px}.anNote{margin-top:8px}.anTW{overflow-x:auto;max-height:420px;overflow-y:auto}'+
+  '.anT{border-collapse:collapse;width:100%;font-size:13px}.anT th,.anT td{padding:8px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}'+
+  '.anT th:first-child,.anT td:first-child{text-align:left;font-weight:600}.anT th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);position:sticky;top:0;background:var(--panelSolid);cursor:pointer;user-select:none}'+
+  '.anT th:hover{color:var(--cyan)}.anT th.asc:after{content:" ▲"}.anT th.desc:after{content:" ▼"}'+
+  '.anT tbody tr:hover{background:var(--chip)}.anBar{display:inline-block;height:6px;background:var(--cyan);opacity:.55;border-radius:3px;vertical-align:middle;margin-right:8px}'+
+  '.anPill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700}.anG{background:rgba(84,167,55,.15);color:var(--greenDk)}.anR{background:rgba(217,89,74,.14);color:var(--red)}.anN{background:var(--chip);color:var(--muted)}'+
+  '.anUp{color:var(--greenDk);font-weight:700}.anDn{color:var(--red);font-weight:700}'+
+  '.anFun{display:flex;flex-direction:column;gap:9px}.anFun .r{display:grid;grid-template-columns:96px 1fr 88px;gap:10px;align-items:center;font-size:13px}.anFun .tr{height:22px;background:var(--chip);border-radius:6px;overflow:hidden}.anFun .fl{height:100%;border-radius:6px;transition:width .4s}.anFun b{text-align:right}'+
+  '@media print{body *{visibility:hidden}#v-an,#v-an *{visibility:visible}#v-an{position:absolute;left:0;top:0;width:100%;display:block!important}'+
+  '.anFilters,.anDl,.anHint{display:none!important}.anCard,.anIn,.kpi{break-inside:avoid;box-shadow:none!important}.anTW{max-height:none!important;overflow:visible!important}.s8,.s6,.s4{grid-column:span 12}}'+
+  '</style>'+
+  '<div class="anHead"><div><h2>📊 Data Analysis</h2><div class="sub" id="anSub"></div></div>'+
+  '<div class="anFilters">'+
+  '<div><label>From</label><input type="date" id="anFrom" onchange="anDateChg_()"></div>'+
+  '<div><label>To</label><input type="date" id="anTo" onchange="anDateChg_()"></div>'+
+  '<div><label>Month</label><select id="anMonth" onchange="renderAnalysis()"></select></div>'+
+  '<div><label>Source</label><select id="anSource" onchange="renderAnalysis()"></select></div>'+
+  '<div><label>Product</label><select id="anProduct" onchange="renderAnalysis()"></select></div>'+
+  '<div><label>State</label><select id="anState" onchange="renderAnalysis()"></select></div>'+
+  '<div><label>Stage</label><select id="anStage" onchange="renderAnalysis()"></select></div>'+
+  '<button class="btn ghost sm" onclick="anReset_()">✕ Reset</button>'+
+  '<button class="btn ghost sm" onclick="loadAnalysis()">↻ Refresh</button>'+
+  '<button class="btn ghost sm" onclick="anExport_()">⬇ Raw rows CSV</button>'+
+  (AN_SH ? '' : '<button class="btn ghost sm" onclick="anCustomers_()">⬇ Customers list (Won)</button>')+
+  '<button class="btn ghost sm" onclick="anExcel_()">⬇ Excel (tables + data)</button>'+
+  '<button class="btn sm" onclick="window.print()">🖨 Print / PDF</button></div></div>'+
+  '<div class="anHint">Tip: click a bar or slice in the product, state, source, stage or monthly charts to filter the whole page. Click a table heading to sort.</div>'+
+  '<div class="anIns" id="anIns"></div>'+
+  '<div class="kpis" id="anKpis"></div>'+
+  '<div class="anGrid">'+anCard_('anCmpT','Period comparison','','s12')+'</div>'+
+  '<div class="anGrid">'+anCard_('anDay','Leads per day','Last 90 days that had leads','s8')+anCard_('anFunnel','Conversion funnel','Share is of total leads','s4')+'</div>'+
+  (AN_SH ? '' : '<div class="anGrid">'+anCard_('anSpeed','Speed &amp; follow-up','Sheet dates have no time of day, so speed is counted in days. Idle = days since last call / contact, for leads still New, Quoted or Follow-up.','s12')+'</div>')+
+  '<div class="anGrid">'+anCard_('anMonthC','Monthly trend','Leads vs won','s8')+anCard_('anStageC','Stage mix','','s4')+'</div>'+
+  '<div class="anGrid">'+anCard_('anProdC','Top products by leads','','s8')+anCard_('anSourceC','Lead source','','s4')+'</div>'+
+  '<div class="anGrid">'+anCard_('anProdT','Product performance','Win% = won ÷ (won + lost). Top 30 products.','s12')+'</div>'+
+  '<div class="anGrid">'+anCard_('anDemandT','Product demand','Est. units = quantity-band midpoint per lead (blank = 30). A buying-size estimate, not order value.','s12')+'</div>'+
+  '<div class="anGrid">'+anCard_('anHeatT','Product × State heatmap','Number of leads. Top 10 states × top 8 products, known states only.','s12')+'</div>'+
+  '<div class="anGrid">'+anCard_('anStateC','Top states','','s6')+anCard_('anZoneC','Zone split','','s6')+'</div>'+
+  '<div class="anGrid">'+anCard_('anStateT','State performance','','s12')+'</div>'+
+  '<div class="anGrid">'+anCard_('anDistT','Top districts','','s6')+anCard_('anPinT','Top pincodes','','s6')+'</div>'+
+  (AN_SH ? '' : '<div class="anGrid">'+anCard_('anRepeatT','Repeat customers','Customers are matched by phone number. "1×" = enquired once.','s6')+anCard_('anRepT','By lead owner','','s6')+'</div>')+
+  '<div class="anGrid">'+anCard_('anMonthT','Month-wise table','','s12')+'</div>'+
+  (AN_SH ? '' : '<div class="anGrid"><div class="card anCard s12"><div class="anCH"><h3 class="sectitle">🏆 Won Customers <span class="sub" id="anWonCount"></span></h3><div style="display:flex;gap:8px"><input type="search" id="anWonSearch" placeholder="Search name, phone, product, state…" oninput="renderWonCustomers()" style="min-width:240px"><button class="btn ghost sm" onclick="anCustomers_()">⬇ CSV</button></div></div><div id="anWonTable"></div><div class="sub anNote">Name + phone of Won / Dispatched / Closed enquiries. Login only — not shown on the public link.</div></div></div>');
+  AN.built = true;
+}
+
+function loadAnalysis(){
+  if (!AN.built) anBuild_();
+  anEl_('anSub').textContent = 'Loading…';
+  var run = google.script.run.withSuccessHandler(function(rows){
+    AN.rows = rows; AN.asOf = new Date().toLocaleString('en-IN'); anFilters_(); renderAnalysis(); if (!AN_SH) loadWonCustomers();
+  }).withFailureHandler(function(err){ anEl_('anSub').textContent = ''; handleAuthError(err, 'Error loading analysis'); });
+  if (AN_SH) run.getAnalysisShared(window.AN_SHARE); else run.getAnalysis(AUTH_TOKEN);
+}
+function anFilters_(){
+  [['anMonth',AN_.MO,'All months'],['anSource',AN_.SO,'All sources'],['anProduct',AN_.PR,'All products'],['anState',AN_.ST,'All states'],['anStage',AN_.SG,'All stages']].forEach(function(x){
+    var el = anEl_(x[0]), cur = el.value, m = {};
+    AN.rows.forEach(function(r){ if (r[x[1]]) m[r[x[1]]] = (m[r[x[1]]]||0)+1; });
+    var o = Object.keys(m).sort(function(a,b){ return m[b]-m[a]; }).slice(0, 80);
+    if (x[1]===AN_.MO) o.sort().reverse();
+    el.innerHTML = '<option value="">'+x[2]+'</option>' + o.map(function(v){ return '<option value="'+esc(v)+'">'+esc(x[1]===AN_.MO?anMonthLbl_(v):x[1]===AN_.PR?anNice_(v):v)+' ('+m[v]+')</option>'; }).join('');
+    el.value = cur;
+  });
+}
+function anReset_(){ ['anFrom','anTo','anMonth','anSource','anProduct','anState','anStage'].forEach(function(i){ anEl_(i).value=''; }); renderAnalysis(); }
+function anDateChg_(){ anEl_('anMonth').value = ''; renderAnalysis(); }
+// Filter rows. skipDate=true ignores From/To/Month (the period comparison brings its own dates).
+function anRows_(skipDate){
+  var fm = anEl_('anMonth').value, fs = anEl_('anSource').value, fp = anEl_('anProduct').value, fst = anEl_('anState').value, fg = anEl_('anStage').value,
+      d1 = anEl_('anFrom').value, d2 = anEl_('anTo').value;
+  return AN.rows.filter(function(r){
+    if (!skipDate && ((fm && r[AN_.MO]!==fm) || (d1 && r[AN_.DT] < d1) || (d2 && r[AN_.DT] > d2))) return false;
+    return (!fs||r[AN_.SO]===fs) && (!fp||r[AN_.PR]===fp) && (!fst||r[AN_.ST]===fst) && (!fg||r[AN_.SG]===fg);
+  });
+}
+// Chart click -> set a filter (click the same value again to clear it)
+function anDrill_(selId, val){
+  var el = anEl_(selId); if (!val || val === 'Others') return;
+  if (el.value === val) el.value = '';
+  else { if (![].some.call(el.options, function(o){ return o.value === val; })) el.insertAdjacentHTML('beforeend', '<option value="'+esc(val)+'">'+esc(val)+'</option>'); el.value = val; }
+  if (selId === 'anMonth') { anEl_('anFrom').value = ''; anEl_('anTo').value = ''; }
+  renderAnalysis();
+}
+function anSave_(content, name, type){
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['﻿'+content], {type:type})); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function anTableCsv_(id, title){
+  var t = anEl_(id).querySelector('table'); if (!t) return toast('Nothing to export');
+  var q = function(v){ return '"'+String(v).replace(/"/g,'""')+'"'; };
+  var csv = [].map.call(t.rows, function(r){ return [].map.call(r.cells, function(c){ return q(c.textContent.trim()); }).join(','); }).join('\n');
+  anSave_(csv, title.toLowerCase().replace(/[^a-z0-9]+/g,'-')+'-'+new Date().toISOString().slice(0,10)+'.csv', 'text/csv');
+}
+// One .xls (HTML tables, opens in Excel): every table currently shown + a "Data" table with every filtered enquiry row
+function anExcel_(){
+  var cards = [].slice.call(document.querySelectorAll('#v-an .anCard')).filter(function(c){ return c.querySelector('table'); });
+  var head = '<tr>'+AN_HDR.map(function(h){ return '<th>'+h+'</th>'; }).join('')+'</tr>';
+  var data = '<table>'+head+anRows_().map(function(r){ return '<tr>'+r.map(function(v){ return '<td>'+esc(v)+'</td>'; }).join('')+'</tr>'; }).join('')+'</table>';
+  var html = '<html><head><meta charset="utf-8"></head><body><h2>Enquiry Data Analysis</h2><p>'+esc(anEl_('anSub').textContent)+'</p>'+
+    cards.map(function(c){ return '<h3>'+esc(c.querySelector('.sectitle').textContent)+'</h3>'+c.querySelector('table').outerHTML+'<br>'; }).join('')+'<h3>Data (every enquiry in this filter)</h3>'+data+'</body></html>';
+  anSave_(html, 'enquiry-analysis-'+new Date().toISOString().slice(0,10)+'.xls', 'application/vnd.ms-excel');
+}
+// Dashboard "Won Customers" card: name + phone table (login only; not on the public link)
+var WON = [];
+function loadWonCustomers(){
+  if (!document.getElementById('wonTable') && !document.getElementById('anWonTable')) return;
+  google.script.run.withSuccessHandler(function(rows){ WON = rows; renderWonCustomers(); })
+    .withFailureHandler(function(err){ handleAuthError(err, 'Could not load customers'); }).getCustomersList(AUTH_TOKEN);
+}
+function renderWonCustomers(){
+  [['wonSearch','wonCount','wonTable',''],['anWonSearch','anWonCount','anWonTable','anT']].forEach(function(ids){
+    var s = document.getElementById(ids[0]); if (!s) return;
+    var q = (s.value || '').toLowerCase().trim();
+    var rows = WON.filter(function(r){ return !q || r.join(' ').toLowerCase().indexOf(q) >= 0; });
+    document.getElementById(ids[1]).textContent = '· ' + rows.length + (q ? ' of ' + WON.length : '');
+    document.getElementById(ids[2]).innerHTML = rows.length
+      ? '<div class="anTW"><table class="'+ids[3]+'"><thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Product</th><th>State</th><th>City</th><th>Date</th></tr></thead><tbody>' +
+        rows.slice(0, 500).map(function(r){ return '<tr><td>'+esc(r[0])+'</td><td>'+esc(r[1])+'</td><td><a href="'+telLink(r[2])+'">'+esc(r[2])+'</a> · <a href="'+waLink(r[2])+'" target="_blank" rel="noopener">WhatsApp</a></td><td>'+esc(r[4])+'</td><td>'+esc(r[5])+'</td><td>'+esc(r[6])+'</td><td>'+esc(r[7])+'</td></tr>'; }).join('') + '</tbody></table></div>'
+      : '<div class="empty">No Won customers found</div>';
+  });
+}
+// Won / Dispatched / Closed customers with name + phone as CSV (login only; not available on the public link)
+function anCustomers_(){
+  google.script.run.withSuccessHandler(function(rows){
+    var h = ['Name','Company','Phone','Phone (+91)','Product','State','City','EnquiryDate','Stage'];
+    var q = function(v){ return '"'+String(v).replace(/"/g,'""')+'"'; };
+    anSave_([h.map(q).join(',')].concat(rows.map(function(r){ return r.map(q).join(','); })).join('\n'), 'customers-won-'+new Date().toISOString().slice(0,10)+'.csv', 'text/csv');
+    toast(rows.length+' customers exported');
+  }).withFailureHandler(function(err){ handleAuthError(err, 'Could not export customers'); }).getCustomersList(AUTH_TOKEN);
+}
+function anExport_(){
+  var h = AN_HDR;
+  var q = function(v){ return '"'+String(v).replace(/"/g,'""')+'"'; };
+  var csv = [h.map(q).join(',')].concat(anRows_().map(function(r){ return r.map(q).join(','); })).join('\n');
+  anSave_(csv, 'enquiry-analysis-'+new Date().toISOString().slice(0,10)+'.csv', 'text/csv');
+}
+// Click a table heading to sort that table (numbers numerically, text alphabetically)
+document.addEventListener('click', function(e){
+  var th = e.target.closest && e.target.closest('.anT th'); if (!th) return;
+  var t = th.closest('table'), i = th.cellIndex, dir = th.classList.contains('asc') ? -1 : 1;
+  [].forEach.call(t.querySelectorAll('th'), function(x){ x.classList.remove('asc','desc'); });
+  th.classList.add(dir === 1 ? 'asc' : 'desc');
+  var val = function(tr){ var s = tr.cells[i].textContent.trim().replace(/[,%×x]/g,''), n = parseFloat(s); return isNaN(n) ? (s === '–' || s === '' ? -1 : s.toLowerCase()) : n; };
+  var body = t.tBodies[0], rows = [].slice.call(body.rows);
+  rows.sort(function(a,b){ var x = val(a), y = val(b);
+    return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))) * dir; });
+  rows.forEach(function(r){ body.appendChild(r); });
+});
+
+// group rows by keyFn -> [{key, rows, n, called, conn, inte, won, lost}] sorted by leads
+function anGroup_(rows, keyFn){
+  var m = {};
+  rows.forEach(function(r){ var k = keyFn(r); (m[k] = m[k] || []).push(r); });
+  return Object.keys(m).map(function(k){
+    var x = m[k], s = function(i){ return x.reduce(function(a,r){ return a + r[i]; }, 0); };
+    return { key:k, rows:x, n:x.length, called:s(AN_.CA), conn:s(AN_.CN), inte:s(AN_.IN),
+      won:x.filter(anWon_).length, lost:x.filter(function(r){ return r[AN_.SG]==='Lost'; }).length };
+  }).sort(function(a,b){ return b.n - a.n; });
+}
+function anWinPill_(w,l){
+  if (!(w+l)) return '<span class="anPill anN">–</span>';
+  var p = 100*w/(w+l);
+  return '<span class="anPill '+(p>=30?'anG':p<10?'anR':'anN')+'">'+p.toFixed(0)+'%</span>';
+}
+function anTable_(id, groups, first, label){
+  var mx = groups.length ? groups[0].n : 1;
+  anEl_(id).innerHTML = groups.length
+    ? '<div class="anTW"><table class="anT"><thead><tr><th>'+first+'</th><th>Leads</th><th>Called</th><th>Connected</th><th>Interested</th><th>Won</th><th>Lost</th><th>Win%</th></tr></thead><tbody>' +
+      groups.map(function(g){ return '<tr><td>'+(label?label(g.key):esc(g.key))+'</td><td><span class="anBar" style="width:'+Math.round(60*g.n/mx)+'px"></span>'+g.n+'</td><td>'+anPct_(g.called,g.n)+'</td><td>'+g.conn+'</td><td>'+g.inte+'</td><td>'+g.won+'</td><td>'+g.lost+'</td><td>'+anWinPill_(g.won,g.lost)+'</td></tr>'; }).join('') + '</tbody></table></div>'
+    : '<div class="empty">No data for this filter</div>';
+}
+function anChart_(id, opt, h, onClick){
+  var el = anEl_(id), dark = document.documentElement.getAttribute('data-theme') === 'dark';
+  var base = { chart: { height: h||280, toolbar:{show:false}, fontFamily:'Plus Jakarta Sans', foreColor: dark?'#9fb3c8':'#5d7c8a', animations:{speed:350} },
+    theme:{mode: dark?'dark':'light'}, grid:{borderColor: dark?'rgba(255,255,255,.08)':'rgba(19,56,74,.10)'}, dataLabels:{enabled:false}, colors:AN_COL, noData:{text:'No data for this filter'} };
+  var merged = anMerge_(base, opt);
+  if (onClick) { merged.chart.events = { dataPointSelection: function(e, c, cfg){ onClick(cfg.dataPointIndex); } }; }
+  if (AN.charts[id]) { try { AN.charts[id].destroy(); } catch(e){} }
+  el.innerHTML = '';
+  AN.charts[id] = new ApexCharts(el, merged); AN.charts[id].render();
+}
+function anMerge_(a, b){
+  var o = {}; Object.keys(a).forEach(function(k){ o[k] = a[k]; });
+  Object.keys(b).forEach(function(k){
+    o[k] = (a[k] && typeof a[k]==='object' && !Array.isArray(a[k]) && typeof b[k]==='object' && !Array.isArray(b[k])) ? anMerge_(a[k], b[k]) : b[k];
+  });
+  return o;
+}
+function anDonut_(id, groups, h, selId){
+  var top = groups.slice(0,7), rest = groups.slice(7).reduce(function(a,g){ return a+g.n; },0);
+  var keys = top.map(function(g){ return g.key; }), labels = top.map(function(g){ return anNice_(g.key); }), data = top.map(function(g){ return g.n; });
+  if (rest) { labels.push('Others'); data.push(rest); keys.push('Others'); }
+  anChart_(id, { chart:{type:'donut'}, series:data, labels:labels, legend:{position:'bottom'}, stroke:{width:0},
+    plotOptions:{pie:{donut:{size:'66%',labels:{show:true,total:{show:true,label:'Total',formatter:function(w){ return w.globals.seriesTotals.reduce(function(a,b){ return a+b; },0); }}}}}} },
+    h||300, selId ? function(i){ anDrill_(selId, keys[i]); } : null);
+}
+// "+12.5%" / "-3%" / "new" with up/down colouring; goodUp=false flips colour (e.g. Lost going up is bad)
+function anDelta_(cur, prev, goodUp){
+  if (!prev) return cur ? '<span class="anUp">new</span>' : '–';
+  var p = 100*(cur-prev)/prev, good = (goodUp === false) ? p <= 0 : p >= 0;
+  return '<span class="'+(p===0?'':good?'anUp':'anDn')+'">'+(p>0?'+':'')+p.toFixed(1)+'%</span>';
+}
+function anCompare_(){
+  var mode = (anEl_('anCmpMode') || {}).value || 'month', now = new Date(), t = anYmd_(now), c1, c2, p1, p2, lbl;
+  if (mode === 'month') {
+    c1 = anYmd_(new Date(now.getFullYear(), now.getMonth(), 1)); c2 = t;
+    var pm = new Date(now.getFullYear(), now.getMonth()-1, 1), last = new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+    p1 = anYmd_(pm); p2 = anYmd_(new Date(pm.getFullYear(), pm.getMonth(), Math.min(now.getDate(), last)));
+    lbl = 'This month so far vs same days last month';
+  } else {
+    var n = mode === 'week' ? 7 : 30;
+    c1 = anYmd_(anAdd_(now, -(n-1))); c2 = t; p1 = anYmd_(anAdd_(now, -(2*n-1))); p2 = anYmd_(anAdd_(now, -n));
+    lbl = 'Last '+n+' days vs previous '+n+' days';
+  }
+  var rows = anRows_(true);
+  var cur = rows.filter(function(r){ return r[AN_.DT] >= c1 && r[AN_.DT] <= c2; }), prv = rows.filter(function(r){ return r[AN_.DT] >= p1 && r[AN_.DT] <= p2; });
+  var z = { n:0, called:0, conn:0, inte:0, won:0, lost:0 };
+  var A = anGroup_(cur, function(){ return 'a'; })[0] || z, B = anGroup_(prv, function(){ return 'a'; })[0] || z;
+  var met = [['Leads','n',true],['Called','called',true],['Connected','conn',true],['Interested','inte',true],['Won','won',true],['Lost','lost',false]];
+  var pa = anGroup_(cur, function(r){ return r[AN_.PR]; }), pb = {}; anGroup_(prv, function(r){ return r[AN_.PR]; }).forEach(function(g){ pb[g.key] = g.n; });
+  var seen = {}; pa.forEach(function(g){ seen[g.key] = 1; });
+  var mv = pa.map(function(g){ return { k:g.key, c:g.n, p:pb[g.key]||0 }; });
+  Object.keys(pb).forEach(function(k){ if (!seen[k]) mv.push({ k:k, c:0, p:pb[k] }); });
+  mv.sort(function(a,b){ return Math.abs(b.c-b.p) - Math.abs(a.c-a.p); }); mv = mv.slice(0,8);
+  anEl_('anCmpT').innerHTML =
+    '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:10px"><select id="anCmpMode" onchange="anCompare_()" style="min-width:190px">'+
+    ['month|This month vs last month','week|Last 7 days vs previous 7','d30|Last 30 days vs previous 30'].map(function(o){ var p = o.split('|'); return '<option value="'+p[0]+'"'+(p[0]===mode?' selected':'')+'>'+p[1]+'</option>'; }).join('')+
+    '</select><span class="sub">'+lbl+' · <b>'+c1+' → '+c2+'</b> vs <b>'+p1+' → '+p2+'</b> (product, source, state and stage filters apply)</span></div>'+
+    '<div class="grid2"><div class="anTW"><table class="anT"><thead><tr><th>Metric</th><th>Current</th><th>Previous</th><th>Change</th></tr></thead><tbody>'+
+    met.map(function(m){ return '<tr><td>'+m[0]+'</td><td>'+A[m[1]]+'</td><td>'+B[m[1]]+'</td><td>'+anDelta_(A[m[1]], B[m[1]], m[2])+'</td></tr>'; }).join('')+
+    '</tbody></table></div><div class="anTW"><table class="anT"><thead><tr><th>Biggest product movers</th><th>Current</th><th>Previous</th><th>Change</th></tr></thead><tbody>'+
+    (mv.length ? mv.map(function(m){ return '<tr><td>'+esc(anNice_(m.k))+'</td><td>'+m.c+'</td><td>'+m.p+'</td><td>'+anDelta_(m.c, m.p)+'</td></tr>'; }).join('') : '<tr><td colspan="4">No data</td></tr>')+
+    '</tbody></table></div></div>';
+}
+function anSpeed_(rows){
+  var called = rows.filter(function(r){ return r[AN_.RS] !== ''; }), never = rows.length - called.length;
+  var rs = called.map(function(r){ return r[AN_.RS]; }).sort(function(a,b){ return a-b; });
+  var avg = rs.length ? rs.reduce(function(a,b){ return a+b; },0)/rs.length : 0, med = rs.length ? rs[Math.floor(rs.length/2)] : 0;
+  var open = rows.filter(function(r){ return AN_OPEN.indexOf(r[AN_.SG]) >= 0; });
+  var idle7 = open.filter(function(r){ return r[AN_.ID] >= 7; }).length, idle15 = open.filter(function(r){ return r[AN_.ID] >= 15; }).length;
+  var same = called.filter(function(r){ return r[AN_.RS] === 0; }).length, w2 = called.filter(function(r){ return r[AN_.RS] <= 2; }).length;
+  var kp = [['⏱ Avg days to 1st call', rs.length ? avg.toFixed(1) : '–','acc'],['Median days to 1st call', rs.length ? med : '–','acc'],['⚡ Called same day', anPct_(same, rows.length),'good'],
+    ['✅ Called within 2 days', anPct_(w2, rows.length),'good'],['🚫 Never called', never+' ('+anPct_(never, rows.length)+')','alert'],['😴 Open, idle 7+ days', idle7,'today'],['🔥 Open, idle 15+ days', idle15,'alert']];
+  var bk = [['Same day',0,0],['1 day',1,1],['2–3 days',2,3],['4–7 days',4,7],['8+ days',8,1e9]].map(function(b){
+    var g = rows.filter(function(r){ return r[AN_.RS] !== '' && r[AN_.RS] >= b[1] && r[AN_.RS] <= b[2]; }); return [b[0], g]; });
+  bk.push(['Never called', rows.filter(function(r){ return r[AN_.RS] === ''; })]);
+  var idleB = [['0–2 days',0,2],['3–7 days',3,7],['8–14 days',8,14],['15+ days',15,1e9]].map(function(b){
+    return [b[0], open.filter(function(r){ return r[AN_.ID] >= b[1] && r[AN_.ID] <= b[2]; }).length]; });
+  var owners = anGroup_(rows, function(r){ return r[AN_.LB]; }).slice(0,15);
+  var ownRows = owners.map(function(g){
+    var c = g.rows.filter(function(r){ return r[AN_.RS] !== ''; }), o = g.rows.filter(function(r){ return AN_OPEN.indexOf(r[AN_.SG]) >= 0; });
+    return '<tr><td>'+esc(g.key)+'</td><td>'+g.n+'</td><td>'+(c.length ? (c.reduce(function(a,r){ return a+r[AN_.RS]; },0)/c.length).toFixed(1) : '–')+'</td><td>'+(g.n-c.length)+'</td><td>'+o.filter(function(r){ return r[AN_.ID] >= 7; }).length+'</td></tr>'; }).join('');
+  anEl_('anSpeed').innerHTML =
+    '<div class="anKp">'+kp.map(function(x){ return '<div class="card kpi '+x[2]+'"><div class="v">'+x[1]+'</div><div class="l">'+x[0]+'</div></div>'; }).join('')+'</div>'+
+    '<div class="grid2"><div class="anTW"><table class="anT"><thead><tr><th>Time to first call</th><th>Leads</th><th>Share</th><th>Won</th></tr></thead><tbody>'+
+    bk.map(function(b){ return '<tr><td>'+b[0]+'</td><td>'+b[1].length+'</td><td>'+anPct_(b[1].length, rows.length)+'</td><td>'+b[1].filter(anWon_).length+'</td></tr>'; }).join('')+
+    '</tbody></table><br><table class="anT"><thead><tr><th>Open leads: idle for</th><th>Leads</th></tr></thead><tbody>'+
+    idleB.map(function(b){ return '<tr><td>'+b[0]+'</td><td>'+b[1]+'</td></tr>'; }).join('')+'</tbody></table></div>'+
+    '<div class="anTW"><table class="anT"><thead><tr><th>Lead owner</th><th>Leads</th><th>Avg days to 1st call</th><th>Never called</th><th>Open, idle 7+</th></tr></thead><tbody>'+
+    (ownRows || '<tr><td colspan="5">No data</td></tr>')+'</tbody></table></div></div>';
+}
+
+function renderAnalysis(){
+  var rows = anRows_(), n = rows.length;
+  var t = anGroup_(rows, function(){ return 'all'; })[0] || {n:0,called:0,conn:0,inte:0,won:0,lost:0};
+  var dates = rows.map(function(r){ return r[AN_.DT]; }).filter(Boolean).sort();
+  anEl_('anSub').textContent = n.toLocaleString('en-IN')+' of '+AN.rows.length.toLocaleString('en-IN')+' enquiries'+(dates.length?' · '+dates[0]+' → '+dates[dates.length-1]:'')+' · updated '+AN.asOf;
+
+  var k = [['📥 Total leads',n.toLocaleString('en-IN'),'acc'],['📞 Called',anPct_(t.called,n),'today'],['🤝 Connected',t.conn,'good'],['⭐ Interested',t.inte,'purple'],
+    ['🏆 Won',t.won,'good'],['🔴 Lost',t.lost,'alert'],['🎯 Win rate',anPct_(t.won,t.won+t.lost),'acc']];
+  anEl_('anKpis').innerHTML = k.map(function(x){ return '<div class="card kpi '+x[2]+'"><div class="v">'+x[1]+'</div><div class="l">'+x[0]+'</div></div>'; }).join('');
+
+  var prods = anGroup_(rows, function(r){ return r[AN_.PR]; });
+  var known = rows.filter(function(r){ return r[AN_.ST]; });
+  var states = anGroup_(known, function(r){ return r[AN_.ST]; });
+  var sources = anGroup_(rows, function(r){ return r[AN_.SO]; });
+
+  var bestP = prods.filter(function(g){ return g.won+g.lost >= 5; }).sort(function(a,b){ return b.won/(b.won+b.lost) - a.won/(a.won+a.lost); })[0];
+  var rep = rows.filter(function(r){ return r[AN_.RP] > 1; }).length;
+  var ins = [
+    ['Most asked product', prods[0] ? anNice_(prods[0].key) : '–', prods[0] ? prods[0].n+' leads · '+anPct_(prods[0].n,n)+' of total' : ''],
+    ['Top state', states[0] ? states[0].key : '–', states[0] ? states[0].n+' leads · '+anPct_(states[0].n,known.length)+' of known states' : ''],
+    ['Best converting product', bestP ? anNice_(bestP.key) : '–', bestP ? anPct_(bestP.won,bestP.won+bestP.lost)+' win rate ('+bestP.won+' won, min 5 decided)' : 'Not enough decided leads'],
+    ['Top source', sources[0] ? sources[0].key : '–', sources[0] ? sources[0].n+' leads · '+anPct_(sources[0].n,n) : ''],
+    ['Repeat enquiries', rep.toLocaleString('en-IN'), anPct_(rep,n)+' of leads came from a phone that enquired more than once']
+  ];
+  if (AN_SH) ins.pop();
+  anEl_('anIns').innerHTML = ins.map(function(x,i){ return '<div class="anIn" style="border-left-color:'+AN_COL[i]+'"><div class="t">'+x[0]+'</div><div class="b">'+esc(x[1])+'</div><div class="s">'+esc(x[2])+'</div></div>'; }).join('');
+
+  anCompare_();
+  if (!AN_SH) anSpeed_(rows);
+
+  var days = {}; rows.forEach(function(r){ if (r[AN_.DT]) days[r[AN_.DT]] = (days[r[AN_.DT]]||0)+1; });
+  var dk = Object.keys(days).sort().slice(-90);
+  anChart_('anDay', { chart:{type:'area'}, series:[{name:'Leads',data:dk.map(function(d){ return days[d]; })}], xaxis:{categories:dk,tickAmount:8,labels:{rotate:0,formatter:function(v){ return v ? String(v).slice(5) : ''; }}},
+    stroke:{curve:'smooth',width:2.5}, fill:{type:'gradient',gradient:{opacityFrom:.4,opacityTo:.04}}, yaxis:{labels:{formatter:function(v){ return Math.round(v); }}} }, 260);
+
+  var fn = [['Leads',n,AN_COL[0]],['Called',t.called,AN_COL[5]],['Connected',t.conn,AN_COL[6]],['Interested',t.inte,AN_COL[2]],['Won',t.won,AN_COL[1]]];
+  anEl_('anFunnel').innerHTML = '<div class="anFun">'+fn.map(function(x){ var w = n ? Math.max(2, 100*x[1]/n) : 0;
+    return '<div class="r"><span>'+x[0]+'</span><div class="tr"><div class="fl" style="width:'+w+'%;background:'+x[2]+'"></div></div><b>'+x[1].toLocaleString('en-IN')+' <span class="sub">'+anPct_(x[1],n)+'</span></b></div>'; }).join('')+'</div>';
+
+  var months = anGroup_(rows, function(r){ return r[AN_.MO]||'?'; }).sort(function(a,b){ return a.key<b.key?-1:1; });
+  anChart_('anMonthC', { chart:{type:'line'}, series:[{name:'Leads',type:'column',data:months.map(function(g){ return g.n; })},{name:'Won',type:'line',data:months.map(function(g){ return g.won; })}],
+    xaxis:{categories:months.map(function(g){ return anMonthLbl_(g.key); })}, stroke:{width:[0,3],curve:'smooth'}, colors:[AN_COL[0],AN_COL[1]], legend:{position:'top'}, plotOptions:{bar:{borderRadius:4,columnWidth:'45%'}} }, 280,
+    function(i){ anDrill_('anMonth', months[i] && months[i].key); });
+
+  anDonut_('anStageC', anGroup_(rows, function(r){ return r[AN_.SG]||'?'; }), 300, 'anStage');
+  anDonut_('anSourceC', sources, 300, 'anSource');
+
+  var tp = prods.slice(0,10);
+  anChart_('anProdC', { chart:{type:'bar'}, series:[{name:'Leads',data:tp.map(function(g){ return g.n; })},{name:'Won',data:tp.map(function(g){ return g.won; })}],
+    xaxis:{categories:tp.map(function(g){ var s = anNice_(g.key); return s.length>28 ? s.slice(0,27)+'…' : s; })}, plotOptions:{bar:{horizontal:true,borderRadius:3,barHeight:'70%'}},
+    colors:[AN_COL[0],AN_COL[1]], legend:{position:'top'}, dataLabels:{enabled:true,style:{fontSize:'11px'}} }, Math.max(260, 40*tp.length+60),
+    function(i){ anDrill_('anProduct', tp[i] && tp[i].key); });
+
+  anTable_('anProdT', prods.slice(0,30), 'Product', function(k){ return esc(anNice_(k)); });
+  var dem = prods.map(function(g){ return { k:g.key, n:g.n, u:g.rows.reduce(function(a,r){ return a+anUnits_(r[AN_.QT]); },0),
+    big:g.rows.filter(function(r){ return anUnits_(r[AN_.QT])>=100; }).length, warm:g.rows.filter(function(r){ return r[AN_.IN]; }).length, won:g.won }; })
+    .sort(function(a,b){ return b.u-a.u; }).slice(0,15);
+  var tu = dem.reduce(function(a,r){ return a+r.u; },0), mu = dem.length ? dem[0].u : 1;
+  anEl_('anDemandT').innerHTML = dem.length ? '<div class="anTW"><table class="anT"><thead><tr><th>Product</th><th>Leads</th><th>Est. units</th><th>Share</th><th>100+ unit leads</th><th>Interested</th><th>Won</th></tr></thead><tbody>' +
+    dem.map(function(r){ return '<tr><td>'+esc(anNice_(r.k))+'</td><td>'+r.n+'</td><td><span class="anBar" style="width:'+Math.round(80*r.u/mu)+'px"></span>'+Math.round(r.u).toLocaleString('en-IN')+'</td><td>'+anPct_(r.u,tu)+'</td><td>'+r.big+'</td><td>'+r.warm+'</td><td>'+r.won+'</td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="empty">No data for this filter</div>';
+
+  var sts = states.slice(0,10).map(function(g){ return g.key; });
+  var pr8 = prods.slice(0,8).map(function(g){ return g.key; }), cell = {}, mx = 1;
+  known.forEach(function(r){ var kk = r[AN_.ST]+'|'+r[AN_.PR]; cell[kk] = (cell[kk]||0)+1; mx = Math.max(mx, cell[kk]); });
+  anEl_('anHeatT').innerHTML = sts.length ? '<div class="anTW"><table class="anT"><thead><tr><th>State</th>'+pr8.map(function(p){ return '<th>'+esc(anNice_(p))+'</th>'; }).join('')+'<th>Total</th></tr></thead><tbody>' +
+    sts.map(function(s){ var tot = 0; return '<tr><td>'+esc(s)+'</td>'+pr8.map(function(p){ var v = cell[s+'|'+p]||0; tot += v;
+      return '<td style="background:rgba(15,157,199,'+(0.7*v/mx).toFixed(2)+')">'+(v||'')+'</td>'; }).join('')+'<td><b>'+tot+'</b></td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="empty">No state data for this filter</div>';
+
+  var ts = states.slice(0,10);
+  anChart_('anStateC', { chart:{type:'bar'}, series:[{name:'Leads',data:ts.map(function(g){ return g.n; })}], xaxis:{categories:ts.map(function(g){ return g.key; })},
+    plotOptions:{bar:{horizontal:true,borderRadius:3,barHeight:'65%'}}, dataLabels:{enabled:true} }, Math.max(240, 32*ts.length+60),
+    function(i){ anDrill_('anState', ts[i] && ts[i].key); });
+  anDonut_('anZoneC', anGroup_(known, function(r){ return AN_zone_(r[AN_.ST]); }), 280);
+
+  anTable_('anStateT', states.slice(0,20), 'State');
+  anTable_('anDistT', anGroup_(rows.filter(function(r){ return r[AN_.DI]; }), function(r){ return r[AN_.DI]+(r[AN_.ST]?', '+r[AN_.ST]:''); }).slice(0,20), 'District');
+  anTable_('anPinT', anGroup_(rows.filter(function(r){ return r[AN_.P3]; }), function(r){ return r[AN_.P3]; }).slice(0,25), 'Pincode');
+  if (!AN_SH) anTable_('anRepeatT', anGroup_(rows, function(r){ return Math.min(r[AN_.RP], 4); }).sort(function(a,b){ return a.key-b.key; }), 'Enquiries by same phone', function(k){ return k >= 4 ? '4× or more' : k+'×'; });
+  anTable_('anMonthT', months, 'Month', function(k){ return esc(anMonthLbl_(k)); });
+  if (!AN_SH) anTable_('anRepT', anGroup_(rows, function(r){ return r[AN_.LB]; }), 'Lead by');
+}
+</script>

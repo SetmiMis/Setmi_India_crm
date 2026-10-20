@@ -1,0 +1,113 @@
+<script>
+function getDashFilters() {
+    return {
+        dateFrom: document.getElementById('dFilterFrom') ? document.getElementById('dFilterFrom').value : '',
+        dateTo: document.getElementById('dFilterTo') ? document.getElementById('dFilterTo').value : '',
+        leadBy: document.getElementById('dFilterLead') ? document.getElementById('dFilterLead').value : '',
+        source: document.getElementById('dFilterSource') ? document.getElementById('dFilterSource').value : '',
+        priority: document.getElementById('dFilterPri') ? document.getElementById('dFilterPri').value : '',
+        stage: document.getElementById('dFilterStage') ? document.getElementById('dFilterStage').value : ''
+    };
+}
+
+function resetDashFilters() {
+    ['dFilterFrom', 'dFilterTo', 'dFilterLead', 'dFilterSource', 'dFilterPri', 'dFilterStage'].forEach(id => {
+        if(document.getElementById(id)) document.getElementById(id).value = '';
+    });
+    refreshDashboard();
+}
+
+function refreshDashboard() {
+    loadDash();
+}
+
+function toggleDashFilters(){
+    var body = document.getElementById('dashFiltersBody');
+    var icon = document.getElementById('dashFilterToggleIcon');
+    if (!body) return;
+    var nowHidden = body.classList.toggle('hidden');
+    if (icon) icon.textContent = nowHidden ? '▾' : '▴';
+}
+
+// KPIs + charts now come from ONE backend call (getDashboardData) instead of two separate
+// google.script.run round-trips that each independently re-scanned the whole sheet.
+function loadDash() {
+    var f = getDashFilters();
+    if (typeof loadWonCustomers === 'function') loadWonCustomers();
+
+    if(document.getElementById("asOf")) document.getElementById("asOf").textContent = "Loading...";
+
+    google.script.run
+    .withSuccessHandler(function(res){
+        var d = res.kpis;
+        document.getElementById("asOf").textContent = d.asOf || "";
+
+        updateFuBadge(d.overdue || 0, d.dueToday || 0);
+
+        var k = [
+            // ROW 1: General Business Metrics
+            { l:"📥 Total Enquiries", v:d.totalEnquiries || 0, c:"acc",
+              go:function(){ goToPipelineFiltered({}); } },
+            { l:"🟢 Active Pipeline", v:d.activePipeline || 0, c:"acc",
+              go:function(){ goToPipelineFiltered({}, {stage:['New','Quoted','Follow-up'], label:'Active Pipeline (open stages)'}); } },
+            { l:"📈 Win Rate", v:(d.winRate || 0) + "%", c:"purple" },
+            { l:"📞 Contacted ("+(d.contacted||0)+")", v:(d.contactedPct || 0) + "%", c:"acc" },
+            { l:"✅ Approved ("+(d.approved||0)+")", v:(d.approvedPct || 0) + "%", c:"acc" },
+            { l:"🏆 Converted of Approved ("+(d.converted||0)+")", v:(d.convertedPct || 0) + "%", c:"purple" },
+            { l:"⬆ Proprietor Escalations", v:d.escProprietor || 0, c:"alert" },
+            { l:"🏬 Shop Floor Escalations", v:d.escShopFloor || 0, c:"today" },
+
+            // ROW 2: Actionables & Lead Quality
+            { l:"📅 Due Today", v:d.dueToday || 0, c:"today",
+              go:function(){ goToFollowupsSection('today'); } },
+            { l:"🔴 Overdue", v:d.overdue || 0, c:"alert",
+              go:function(){ goToFollowupsSection('overdue'); } },
+            { l:"🔥 Hot Leads", v:d.hotLeads || 0, c:"hot",
+              go:function(){ goToPipelineFiltered({fPriority:'Hot'}); } },
+            { l:"🟠 Warm Leads", v:d.warmLeads || 0, c:"warm",
+              go:function(){ goToPipelineFiltered({fPriority:'Warm'}); } },
+            { l:"🔵 Cold Leads", v:d.coldLeads || 0, c:"cold",
+              go:function(){ goToPipelineFiltered({fPriority:'Cold'}); } }
+        ];
+
+        window.DASH_KPI_LIST = k;
+        document.getElementById("kpis").innerHTML = k.map(function(x, i){
+            var clickAttrs = x.go ? ` style="cursor:pointer" onclick="DASH_KPI_LIST[${i}].go()"` : '';
+            return `<div class="card kpi ${x.c}"${clickAttrs}>
+                        <div class="v">${x.v}</div>
+                        <div class="l">${x.l}</div>
+                    </div>`;
+        }).join("");
+
+        /* ========================== SALES FUNNEL ========================== */
+        var max = 1;
+        META.stages.forEach(function(stage){
+            if((d.funnel[stage] || 0) > max){
+                max = d.funnel[stage];
+            }
+        });
+
+        document.getElementById("funnel").innerHTML = META.stages.map(function(stage){
+            var count = d.funnel[stage] || 0;
+            var width = Math.round((count/max)*100);
+            return `<div class="frow">
+                        <div class="flab">${stage}</div>
+                        <div class="fbar" style="width:${Math.max(width,6)}%">${count}</div>
+                    </div>`;
+        }).join("");
+
+        if (typeof renderAllCharts === "function") renderAllCharts(res.charts);
+
+        // Action Centre mini-list lives in this Dashboard card but is filled by
+        // loadFollowups() (followup.js.html) — that only otherwise runs when the Follow-ups
+        // tab itself is opened, so without this call the card stayed blank on every dashboard
+        // load until a rep happened to visit Follow-ups first.
+        if (typeof loadFollowups === "function") loadFollowups();
+    })
+    .withFailureHandler(function(err){
+        console.error(err);
+        handleAuthError(err, "Dashboard Load Error");
+    })
+    .getDashboardData(f, AUTH_TOKEN);
+}
+</script>

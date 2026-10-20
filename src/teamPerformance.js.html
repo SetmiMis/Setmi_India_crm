@@ -1,0 +1,41 @@
+<script>
+
+  /* TEAM PERFORMANCE — admin-only leaderboard */
+var TEAM_PERF_TABLE = null;
+
+function getTeamPerfTable_() {
+  if (TEAM_PERF_TABLE) return TEAM_PERF_TABLE;
+  TEAM_PERF_TABLE = new DataTable({
+    id: 'teamPerfTable',
+    searchable: false,
+    pageSizeOptions: [25, 50, 100],
+    emptyText: 'No rep activity yet.',
+    defaultSort: { key: 'won', dir: 'desc' },
+    rowKey: function(r) { return r.name; },
+    columns: [
+      { key: 'name', label: 'Rep', render: function(r) { return '<b>'+esc(r.name)+'</b>'; } },
+      { key: 'leads', label: 'Leads' },
+      { key: 'open', label: 'Open' },
+      { key: 'overdue', label: 'Overdue', render: function(r) { return '<span class="'+(r.overdue>0?'pri-Hot':'')+'">'+r.overdue+'</span>'; } },
+      { key: 'callsMonth', label: 'Calls (mo / today)', render: function(r) { return r.callsMonth+' <span class="sub">/ '+r.callsToday+'</span>'; } },
+      { key: 'followupsMonth', label: 'Follow-ups (mo)' },
+      { key: 'won', label: 'Won', render: function(r) { return '<span class="b-Won">'+r.won+'</span>'; } },
+      { key: 'lost', label: 'Lost', render: function(r) { return '<span class="b-Lost">'+r.lost+'</span>'; } },
+      { key: 'winRate', label: 'Win %', render: function(r) { return r.winRate+'%'; } }
+    ]
+  }).mount();
+  return TEAM_PERF_TABLE;
+}
+
+function loadTeamPerformance(){
+  google.script.run.withSuccessHandler(function(d){
+    document.getElementById('teamPerfKpis').innerHTML =
+      '<div class="kpi acc"><div class="v">'+d.totals.leads+'</div><div class="l">Total Leads Owned</div></div>'+
+      '<div class="kpi good"><div class="v">'+d.totals.won+'</div><div class="l">Won</div></div>'+
+      '<div class="kpi alert"><div class="v">'+d.totals.lost+'</div><div class="l">Lost</div></div>'+
+      '<div class="kpi today"><div class="v">'+d.totals.callsMonth+'</div><div class="l">Calls This Month</div></div>';
+    document.getElementById('teamPerfAsOf').textContent = 'As of '+d.asOf;
+    getTeamPerfTable_().setRows(d.reps);
+  }).withFailureHandler(function(err){ handleAuthError(err, 'Error loading team performance'); }).getTeamPerformance(AUTH_TOKEN);
+}
+</script>

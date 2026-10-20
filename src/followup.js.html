@@ -1,0 +1,90 @@
+<script>
+/* =====================================================
+   FOLLOW-UPS LOGIC
+   Single dropdown picks which bucket (Overdue / Due Today / Upcoming) is shown,
+   instead of stacking all three — each is paginated 25 rows at a time.
+===================================================== */
+var FU_DATA = { overdue: [], today: [], upcoming: [] };
+var FU_PAGE = { overdue: 1, today: 1, upcoming: 1 };
+var FU_PAGE_SIZE = 25;
+var FU_META = {
+  overdue:  { title: '⚠ Overdue',   color: 'var(--red)',   empty: 'Koi overdue follow-up nahi 🎉' },
+  today:    { title: '● Due Today', color: 'var(--green)', empty: 'Aaj koi follow-up due nahi' },
+  upcoming: { title: 'Upcoming',    color: 'var(--ink)',    empty: 'Koi upcoming follow-up nahi' }
+};
+
+function fuRow(e){
+  var due = e.NextFollowUp;
+  var cls = due < today() ? 'due-over' : (due === today() ? 'due-today' : '');
+  var wa = e.waFollow ? '<a href="' + e.waFollow + '" target="_blank" class="btn green sm wa">WA</a>' : '';
+
+  return '<tr>'+
+    '<td><b>'+esc(e.Customer)+'</b><div class="sub">'+esc(e.Company||'')+' · '+e.EnqID+'</div></td>'+
+    '<td>'+badge(e.Stage)+'<div class="sub pri-'+e.Priority+'">'+esc(e.LeadBy||'')+' · '+esc(e.Priority||'')+'</div></td>'+
+    '<td>'+esc(e.Requirement||'')+'</td>'+
+    '<td>'+esc(e.LastContact||'—')+'</td>'+
+    '<td class="'+cls+'">'+esc(due||'')+(e.DaysOverdue?'<div class="sub">'+e.DaysOverdue+'d overdue</div>':'')+(e.Grade?'<div class="sub">Grade '+esc(e.Grade)+'</div>':'')+(e.Escalation?'<div class="sub">⬆ '+esc(e.Escalation)+'</div>':'')+'</td>'+
+    '<td class="actions"><button class="btn sm" onclick="openDetail(\''+e.EnqID+'\')">Open</button>'+wa+'</td></tr>';
+}
+
+function fuTable(list, emptyMsg){
+  if(!list.length) return '<div class="empty">'+emptyMsg+'</div>';
+  return '<table><thead><tr><th>Customer</th><th>Stage / Lead By · Priority</th><th>Requirement</th><th>Last</th><th>Next</th><th>Action</th></tr></thead><tbody>'+list.map(fuRow).join('')+'</tbody></table>';
+}
+
+function fuPager(section, total){
+  var totalPages = Math.max(1, Math.ceil(total / FU_PAGE_SIZE));
+  if (totalPages <= 1) return '';
+  var page = FU_PAGE[section];
+  return '<div class="sub" style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">'+
+    '<span>Page '+page+' of '+totalPages+' ('+total+' total)</span>'+
+    '<span>'+
+    '<button class="btn ghost sm" '+(page<=1?'disabled':'')+' onclick="fuGoPage(\''+section+'\','+(page-1)+')">‹ Prev</button> '+
+    '<button class="btn ghost sm" '+(page>=totalPages?'disabled':'')+' onclick="fuGoPage(\''+section+'\','+(page+1)+')">Next ›</button>'+
+    '</span></div>';
+}
+
+function renderFuSection(){
+  var section = val('fuFilter') || 'overdue';
+  var meta = FU_META[section];
+  var list = FU_DATA[section] || [];
+  var start = (FU_PAGE[section]-1) * FU_PAGE_SIZE;
+
+  var titleEl = document.getElementById('fuSectionTitle');
+  titleEl.textContent = meta.title;
+  titleEl.style.color = meta.color;
+  document.getElementById('fuSectionSub').textContent = 'Showing '+list.length;
+  document.getElementById('fuList').innerHTML = fuTable(list.slice(start, start+FU_PAGE_SIZE), meta.empty) + fuPager(section, list.length);
+}
+
+function fuGoPage(section, page){
+  FU_PAGE[section] = page;
+  renderFuSection();
+}
+
+function fuSwitchSection(){
+  renderFuSection();
+}
+
+function updateFuDropdownOptions(){
+  var sel = document.getElementById('fuFilter');
+  if (!sel) return;
+  sel.options[0].text = '⚠ Overdue ('+FU_DATA.overdue.length+')';
+  sel.options[1].text = '● Due Today ('+FU_DATA.today.length+')';
+  sel.options[2].text = 'Upcoming ('+FU_DATA.upcoming.length+')';
+}
+
+function loadFollowups(){
+  google.script.run.withSuccessHandler(function(d){
+    FU_DATA = d;
+    FU_PAGE = { overdue: 1, today: 1, upcoming: 1 };
+    updateFuDropdownOptions();
+    renderFuSection();
+
+    updateFuBadge(d.overdue.length, d.today.length);
+
+    var mini = d.overdue.concat(d.today);
+    document.getElementById('actionMini').innerHTML = mini.length ? ('<div class="tablecard">'+fuTable(mini.slice(0,8),'')+'</div>') : '<div class="empty">All clear ✓</div>';
+  }).getFollowUpsDue(AUTH_TOKEN);
+}
+</script>

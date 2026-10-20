@@ -1,0 +1,4 @@
+{
+  "scriptId": "<APPS_SCRIPT_PROJECT_ID — copy to .clasp.json locally; see docs/13>",
+  "rootDir": "src"
+}

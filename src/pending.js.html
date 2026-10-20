@@ -1,0 +1,180 @@
+<script>
+/* =====================================================
+   PENDING APPROVALS — every new lead lands here for review before it becomes a real enquiry:
+   the New Enquiry form (doc optional), the public field-capture link, and Bulk Import rows.
+   PhotoUrl holds an attached PDF/photo when there is one; most rows won't have one.
+===================================================== */
+var PEND_CACHE = [];
+var PEND_TABLE = null;
+
+function getPendTable_() {
+  if (PEND_TABLE) return PEND_TABLE;
+  PEND_TABLE = new DataTable({
+    id: 'pendList',
+    searchKeys: ['Customer', 'Company', 'Phone', 'Requirement', 'SubmittedBy'],
+    pageSize: 25,
+    emptyText: 'Koi pending approval nahi ✓',
+    defaultSort: { key: 'CreatedAt', dir: 'desc' },
+    rowKey: function(p) { return p.PendingID; },
+    columns: [
+      { key: 'PhotoUrl', label: 'Document', sortable: false, render: function(p) {
+          return p.PhotoUrl ? '<a href="'+esc(p.PhotoUrl)+'" target="_blank" class="btn ghost sm">📄 View</a>' : '<span class="sub">None</span>';
+        } },
+      { key: 'Customer', label: 'Customer', render: function(p) {
+          return '<b>'+esc(p.Customer)+'</b><div class="sub">'+esc(p.Company||'')+' · '+esc(p.Phone||'')+'</div>';
+        } },
+      { key: 'Requirement', label: 'Requirement', render: function(p) {
+          return esc(p.Requirement||'')+'<div class="sub pri-'+p.Priority+'">'+esc(p.Priority||'')+' · '+esc(p.Source||'')+'</div>';
+        } },
+      { key: 'CreatedAt', label: 'Submitted', render: function(p) {
+          return '<span class="sub">'+esc(p.CreatedAt||'')+'<div>'+esc(p.SubmittedBy||'')+'</div></span>';
+        } },
+      { key: 'actions', label: 'Action', sortable: false, hideable: false, render: function(p) {
+          return '<div class="actions">'+
+            '<button class="btn sm" onclick="openPendingEdit(\''+p.PendingID+'\')">✏ Edit</button>'+
+            '<button class="btn green sm" onclick="approvePending(\''+p.PendingID+'\')">Approve</button>'+
+            '<button class="btn red sm" onclick="rejectPending(\''+p.PendingID+'\')">Reject</button>'+
+            '</div>';
+        } }
+    ],
+    bulkActions: [
+      { label: 'Approve Selected', icon: '✔', className: 'green', run: function(rows) { bulkPending_(rows.map(function(p){return p.PendingID;}), 'approve'); } },
+      { label: 'Reject Selected', icon: '✕', className: 'red', run: function(rows) { bulkPending_(rows.map(function(p){return p.PendingID;}), 'reject'); } }
+    ]
+  }).mount();
+  return PEND_TABLE;
+}
+
+function loadPending(){
+  google.script.run.withSuccessHandler(function(list){
+    PEND_CACHE = list;
+    getPendTable_().setRows(list);
+    var badge = document.getElementById('pendBadge');
+    if (badge) badge.innerHTML = list.length ? ('<span class="badge b-Lost">'+list.length+'</span>') : '';
+  }).withFailureHandler(function(err){
+    console.error(err);
+    if (handleAuthError(err)) return;
+    var el = document.getElementById('pendList');
+    if (el) el.innerHTML = '<div class="empty">Could not load Pending Approvals — run setupSheets() once from the Apps Script editor if this is a fresh install.</div>';
+  }).getPendingEnquiries(AUTH_TOKEN);
+}
+
+function approvePending(id){
+  google.script.run.withSuccessHandler(function(r){
+    toast(r.msg||'Approved');
+    if (r.ok) refreshAll(); else loadPending();
+  }).withFailureHandler(function(err){ handleAuthError(err, 'Error: '+err.message); }).approvePendingEnquiry(id, AUTH_TOKEN);
+}
+
+function rejectPending(id){
+  var reason = prompt('Reject reason (optional):','') || '';
+  google.script.run.withSuccessHandler(function(r){
+    toast(r.msg||'Rejected');
+    loadPending();
+  }).withFailureHandler(function(err){ handleAuthError(err, 'Error: '+err.message); }).rejectPendingEnquiry(id, reason, AUTH_TOKEN);
+}
+
+// Bulk approve/reject — the backend only exposes single-row endpoints, so this walks the
+// selected ids one at a time and reports a combined summary at the end.
+function bulkPending_(ids, mode){
+  if (!ids.length) return;
+  if (mode === 'reject') {
+    var reason = prompt('Reject reason for ' + ids.length + ' selected (optional):', '') || '';
+  }
+  var okCount = 0, failCount = 0, i = 0;
+  function next(){
+    if (i >= ids.length) {
+      toast((mode === 'approve' ? 'Approved ' : 'Rejected ') + okCount + ' of ' + ids.length + (failCount ? (', ' + failCount + ' failed') : ''));
+      refreshAll();
+      return;
+    }
+    var id = ids[i++];
+    var call = google.script.run.withSuccessHandler(function(r){
+      if (r && r.ok) okCount++; else failCount++;
+      next();
+    }).withFailureHandler(function(){ failCount++; next(); });
+    if (mode === 'approve') call.approvePendingEnquiry(id, AUTH_TOKEN);
+    else call.rejectPendingEnquiry(id, reason, AUTH_TOKEN);
+  }
+  next();
+}
+
+// Per-field edit for a still-Pending row — mainly for fixing a mis-mapped Bulk Import column
+// (or any messy source) one row at a time, before it gets approved into the real pipeline.
+// Reuses the same modalBg/modalBody the enquiry detail modal uses.
+function openPendingEdit(id){
+  var p = PEND_CACHE.filter(function(x){ return x.PendingID === id; })[0];
+  if (!p){ toast('Row not found — list may have refreshed'); loadPending(); return; }
+
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">'+
+      '<h3 class="sectitle" style="margin:0">Edit Pending · '+esc(p.PendingID)+'</h3>'+
+      '<button class="btn ghost sm" onclick="closeModal()">✕</button></div>'+
+    '<div class="grid2">'+
+      '<div><label>Customer</label><input id="pxCust" value="'+esc(p.Customer||'')+'"></div>'+
+      '<div><label>Company</label><input id="pxComp" value="'+esc(p.Company||'')+'"></div>'+
+      '<div><label>Phone</label><input id="pxPhone" value="'+esc(p.Phone||'')+'"></div>'+
+      '<div><label>Email</label><input id="pxEmail" value="'+esc(p.Email||'')+'"></div>'+
+      '<div><label>GST No.</label><input id="pxGST" value="'+esc(p.GST||'')+'"></div>'+
+      '<div><label>Pincode</label><input id="pxPincode" value="'+esc(p.Pincode||'')+'" maxlength="6" inputmode="numeric" onkeyup="fetchPincodeInto(\'pxPincode\',\'pxDistrict\',\'pxState\',\'pxCity\')"></div>'+
+      '<div><label>District</label><input id="pxDistrict" value="'+esc(p.District||'')+'" readonly></div>'+
+      '<div><label>State</label><input id="pxState" value="'+esc(p.State||'')+'" readonly></div>'+
+      '<div><label>City / Area</label><select id="pxCity"><option value="'+esc(p.City||'')+'">'+esc(p.City||'-- Select Area --')+'</option></select></div>'+
+      '<div><label>Source</label><select id="pxSource">'+opts(META.sources, p.Source)+'</select></div>'+
+      '<div><label>Priority</label><select id="pxPri">'+opts(META.priorities, p.Priority)+'</select></div>'+
+      '<div><label>Lead By</label><select id="pxLead">'+opts(META.team, p.LeadBy)+'</select></div>'+
+    '</div>'+
+    '<div style="margin-top:10px"><label>Requirement</label><textarea id="pxReq" rows="2">'+esc(p.Requirement||'')+'</textarea></div>'+
+    '<div style="margin-top:10px"><label>Notes</label><textarea id="pxNotes" rows="2">'+esc(p.Notes||'')+'</textarea></div>'+
+    '<div style="margin-top:14px;display:flex;gap:10px">'+
+      '<button class="btn green" id="pxSave" onclick="commitPendingEdit(\''+esc(p.PendingID)+'\')">Save changes</button>'+
+      '<button class="btn ghost" onclick="closeModal()">Cancel</button>'+
+    '</div>';
+
+  document.getElementById('modalBody').innerHTML = html;
+  document.getElementById('modalBg').classList.remove('hidden');
+}
+
+function commitPendingEdit(id){
+  var phone = val('pxPhone');
+  if (phone && !isValidPhone(phone)){ toast('Phone number 10 digit ka hona chahiye'); return; }
+
+  var b = document.getElementById('pxSave');
+  b.disabled = true;
+  b.innerHTML = '<span class="spin"></span>';
+
+  var p = {
+    id: id,
+    customer: val('pxCust'),
+    company: val('pxComp'),
+    phone: phone,
+    email: val('pxEmail'),
+    gst: val('pxGST'),
+    pincode: val('pxPincode'),
+    district: val('pxDistrict'),
+    state: val('pxState'),
+    city: val('pxCity'),
+    source: val('pxSource'),
+    priority: val('pxPri'),
+    leadBy: val('pxLead'),
+    requirement: val('pxReq'),
+    notes: val('pxNotes')
+  };
+
+  google.script.run.withSuccessHandler(function(r){
+    if (r.ok){
+      toast(r.msg||'Updated');
+      closeModal();
+      loadPending();
+    } else {
+      toast(r.msg);
+      b.disabled = false;
+      b.innerHTML = 'Save changes';
+    }
+  }).withFailureHandler(function(err){
+    if (handleAuthError(err)) return;
+    toast('Error: '+err.message);
+    b.disabled = false;
+    b.innerHTML = 'Save changes';
+  }).updatePendingEnquiry(p, AUTH_TOKEN);
+}
+</script>

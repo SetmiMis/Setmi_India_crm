@@ -1,0 +1,466 @@
+<script>
+  /* DETAIL + STAGE + EDIT */
+  function openDetail(id){
+    document.getElementById('modalBody').innerHTML='<div class="empty">Loading…</div>';
+    document.getElementById('modalBg').classList.remove('hidden');
+    callExtraUnlocked = false; // fresh enquiry (or a reload of this one) starts capped at the default 6 again
+
+    // google.script.run has no built-in timeout — if the response never arrives (server
+    // congestion, a dropped connection, anything), neither handler below ever fires and the
+    // modal is stuck on "Loading…" forever with no way out except closing it. This guard means
+    // the user always gets an answer within 20s, one way or another.
+    var settled = false;
+    var timeoutId = setTimeout(function(){
+      if (settled) return;
+      settled = true;
+      document.getElementById('modalBody').innerHTML =
+        '<div class="empty">This is taking too long — no response from the server after 20s.</div>'+
+        '<div style="margin-top:10px"><button class="btn ghost sm" onclick="openDetail(\''+id+'\')">Retry</button></div>';
+    }, 20000);
+
+    google.script.run.withSuccessHandler(function(res){
+        if (settled) return; settled = true; clearTimeout(timeoutId);
+        if(!res.ok){closeModal();return;}
+        CURRENT=res.enquiry;
+        try {
+          renderDetail(res.enquiry);
+        } catch(e) {
+          document.getElementById('modalBody').innerHTML =
+            '<div class="empty">Rendering error — '+esc(e.message)+'</div>'+
+            '<div style="margin-top:10px"><button class="btn ghost sm" onclick="openDetail(\''+id+'\')">Retry</button></div>';
+        }
+    }).withFailureHandler(function(err){
+        if (settled) return; settled = true; clearTimeout(timeoutId);
+        if (handleAuthError(err)) return;
+        document.getElementById('modalBody').innerHTML =
+          '<div class="empty">Failed to load — '+esc((err && err.message) || String(err))+'</div>'+
+          '<div style="margin-top:10px"><button class="btn ghost sm" onclick="openDetail(\''+id+'\')">Retry</button></div>';
+    }).getEnquiry(id, AUTH_TOKEN);
+  }
+
+  function closeModal(){
+      document.getElementById('modalBg').classList.add('hidden');
+      CURRENT=null;
+  }
+
+  /* CHANGE PASSWORD — reuses the same #modalBg/#modalBody every other detail view uses. */
+  function changePasswordForm(){
+    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">'+
+        '<h3 class="sectitle" style="margin:0">Change Password</h3>'+
+        '<button class="btn ghost sm" onclick="closeModal()">✕</button></div>'+
+      '<div><label>Current Password</label><input id="cpCurrent" type="password" autocomplete="current-password"></div>'+
+      '<div style="margin-top:10px"><label>New Password</label><input id="cpNew" type="password" autocomplete="new-password" placeholder="Min 6 characters"></div>'+
+      '<div style="margin-top:10px"><label>Confirm New Password</label><input id="cpConfirm" type="password" autocomplete="new-password"></div>'+
+      '<div id="cpErr" class="sub" style="color:var(--red);margin-top:8px"></div>'+
+      '<div style="margin-top:14px;display:flex;gap:10px">'+
+        '<button class="btn sm" onclick="commitChangePassword()">Change Password</button>'+
+        '<button class="btn ghost sm" onclick="closeModal()">Cancel</button>'+
+      '</div>';
+    document.getElementById('modalBody').innerHTML = html;
+    document.getElementById('modalBg').classList.remove('hidden');
+  }
+  function commitChangePassword(){
+    var cur = val('cpCurrent'), next = val('cpNew'), confirm = val('cpConfirm');
+    var errEl = document.getElementById('cpErr');
+    if (next.length < 6){ errEl.textContent = 'Naya password kam se kam 6 characters ka ho.'; return; }
+    if (next !== confirm){ errEl.textContent = 'Password match nahi kar rahe.'; return; }
+    google.script.run.withSuccessHandler(function(r){
+      if (r.ok){ toast(r.msg||'Password changed'); closeModal(); }
+      else { errEl.textContent = r.msg || 'Failed'; }
+    }).withFailureHandler(function(err){ handleAuthError(err, 'Failed to change password'); }).changePassword(cur, next, AUTH_TOKEN);
+  }
+
+  // ShipmentWeight is '' when nobody recorded a weight and a number otherwise, so `|| ''` would
+  // wrongly blank out a literal 0 — compare against '' explicitly instead.
+  function weightStr_(w){ return (w===''||w===null||w===undefined) ? '' : String(w); }
+
+  // Google Drive file URLs all contain /d/<fileId>/ — pulling the ID out client-side lets us build
+  // preview/download URLs without a server round-trip or an extra sheet column to store them in.
+  function driveFileId_(url){
+    var m = String(url||'').match(/\/d\/([a-zA-Z0-9_-]+)/);
+    return m ? m[1] : '';
+  }
+  function renderDocRow_(url){
+    var id = driveFileId_(url);
+    var downloadUrl = id ? ('https://drive.google.com/uc?export=download&id='+id) : url;
+    var previewUrl = id ? ('https://drive.google.com/file/d/'+id+'/preview') : '';
+    return '<div class="detrow"><span class="k">Document</span><span class="v">'+
+      '<a href="'+esc(url)+'" target="_blank">📄 Open PDF</a> · '+
+      '<a href="'+esc(downloadUrl)+'" target="_blank">⬇ Download</a>'+
+      (previewUrl ? ' · <a href="#" onclick="togglePdfPreview(\''+esc(previewUrl)+'\');return false;">👁 Preview</a>' : '')+
+      '</span></div>';
+  }
+  function togglePdfPreview(previewUrl){
+    var box = document.getElementById('pdfPreviewBox');
+    var frame = document.getElementById('pdfPreviewFrame');
+    if (!box || !frame) return;
+    var nowHidden = box.classList.toggle('hidden');
+    if (!nowHidden && !frame.src) frame.src = previewUrl;
+  }
+
+
+  function renderCustomerHeader(e){
+    return `
+    <div class="crm-header">
+        <div class="crm-left">
+            <div class="crm-avatar">
+                ${esc((e.Customer || "?").charAt(0).toUpperCase())}
+            </div>
+            <div class="crm-title">
+                <h2>
+                    ${esc(e.Customer)}
+                    ${badge(e.Stage)}
+                </h2>
+                <div class="crm-sub">
+                    ${esc(e.Company || "No Company")}
+                    &nbsp; • &nbsp;
+                    ${e.EnqID}
+                </div>
+                <div class="crm-tags">
+                    <span class="pill">
+                        📞 ${esc(e.Phone || "-")}
+                    </span>
+                    <span class="pill">
+                        📧 ${esc(e.Email || "-")}
+                    </span>
+                    <span class="pill">
+                        🏙 ${esc(e.City || "-")}
+                    </span>
+                    <span class="pill">
+                        👤 ${esc(e.LeadBy || "-")}
+                    </span>
+                    <span class="pill">
+                        🔥 ${esc(e.Priority || "-")}
+                    </span>
+                </div>
+            </div>
+        </div>
+        <div class="crm-action">
+            <button class="btn sm call"
+                    onclick="window.open('${telLink(e.Phone)}')">
+                📞 Call
+            </button>
+            <button class="btn sm wa"
+                    onclick="window.open('${waLink(e.Phone)}','_blank')">
+                💬 WhatsApp
+            </button>
+            ${
+              e.Email
+              ? `<button class="btn sm"
+                         onclick="window.open('mailto:${e.Email}')">
+                    ✉ Email
+                 </button>`
+              : ""
+            }
+            <button class="btn sm"
+                    onclick="editForm()">
+                ✏ Edit
+            </button>
+            ${
+              (CURRENT_USER && e.LeadBy === CURRENT_USER.name && !e.TransferTo)
+              ? `<button class="btn sm ghost" onclick="transferForm()">⇄ Transfer</button>`
+              : ""
+            }
+            ${
+              e.TransferTo
+              ? `<span class="pill" style="background:rgba(224,150,42,0.15);color:var(--gold)">Transfer to ${esc(e.TransferTo)} pending</span>`
+              : ""
+            }
+            <button class="btn sm red"
+                    onclick="deleteEnquiryPrompt()">
+                🗑 Delete
+            </button>
+        </div>
+    </div>
+    `;
+  }
+
+  function transferForm(){
+    var e = CURRENT;
+    if (!e) return;
+    var team = (META.team||[]).filter(function(n){ return n !== e.LeadBy; });
+    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px"><h3 class="sectitle" style="margin:0">Transfer '+esc(e.Customer)+'</h3><button class="btn ghost sm" onclick="renderDetail(CURRENT)">✕</button></div>'+
+      '<p class="sub" style="margin-bottom:12px">Unhe accept karna padega — yeh lead tabhi tak aapki hi rahegi.</p>'+
+      '<div><label>Transfer to</label><select id="xTransferTo">'+opts(team)+'</select></div>'+
+      '<div style="margin-top:14px;display:flex;gap:10px">'+
+        '<button class="btn sm" onclick="commitTransfer()">Transfer</button>'+
+        '<button class="btn ghost sm" onclick="renderDetail(CURRENT)">Cancel</button>'+
+      '</div>';
+    document.getElementById('modalBody').innerHTML = html;
+  }
+
+  function commitTransfer(){
+    var to = val('xTransferTo');
+    google.script.run.withSuccessHandler(function(r){
+      toast(r.msg||(r.ok?'Transferred':'Failed'));
+      if (r.ok){ openDetail(CURRENT.EnqID); refreshAll(); }
+    }).withFailureHandler(function(err){ handleAuthError(err, 'Transfer failed'); }).proposeTransfer(CURRENT.EnqID, to, AUTH_TOKEN);
+  }
+
+  function deleteEnquiryPrompt(){
+    if (!CURRENT) return;
+    if (!confirm('Delete this enquiry ('+CURRENT.EnqID+' — '+CURRENT.Customer+')? This removes it from the pipeline — use this only for a wrong/duplicate entry.')) return;
+    google.script.run.withSuccessHandler(function(r){
+      toast(r.msg||'Deleted');
+      if (r.ok){ closeModal(); refreshAll(); if(document.getElementById('v-pipe').classList.contains('active')) loadPipe(); }
+    }).withFailureHandler(function(err){ handleAuthError(err, 'Error: '+err.message); }).deleteEnquiry(CURRENT.EnqID, AUTH_TOKEN);
+  }
+
+  function editForm(){
+    var e = CURRENT;
+    if (!e) return;
+    
+    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px"><h3 class="sectitle" style="margin:0">Edit Enquiry · '+e.EnqID+'</h3><button class="btn ghost sm" onclick="renderDetail(CURRENT)">✕</button></div>' +
+      '<div class="grid2">' +
+        '<div><label>Customer</label><input id="xCust" value="'+esc(e.Customer||'')+'"></div>' +
+        '<div><label>Company</label><input id="xComp" value="'+esc(e.Company||'')+'"></div>' +
+        '<div><label>Phone</label><input id="xPhone" value="'+esc(e.Phone||'')+'"></div>' +
+        '<div><label>Email</label><input id="xEmail" value="'+esc(e.Email||'')+'"></div>' +
+        
+        // --- NEW FIELDS ---
+        '<div><label>GST No.</label><input id="xGST" value="'+esc(e.GST||'')+'"></div>' +
+        '<div><label>Pincode</label><input id="xPincode" value="'+esc(e.Pincode||'')+'" maxlength="6" inputmode="numeric" onkeyup="fetchPincodeEdit()"></div>' +
+        '<div><label>District</label><input id="xDistrict" value="'+esc(e.District||'')+'" readonly></div>' +
+        '<div><label>State</label><input id="xState" value="'+esc(e.State||'')+'" readonly></div>' +
+        
+        '<div><label>City / Area</label><select id="xCity"><option value="'+esc(e.City||'')+'">'+esc(e.City||'-- Select Area --')+'</option></select></div>' +
+        '<div><label>Source</label><select id="xSource">'+opts(META.sources, e.Source)+'</select></div>' +
+        '<div><label>Priority</label><select id="xPri">'+opts(META.priorities, e.Priority)+'</select></div>' +
+        '<div><label>Lead By</label><select id="xLead">'+opts(META.team, e.LeadBy)+'</select></div>' +
+        '<div><label>Next Follow-up</label><input id="xNext" type="date" value="'+(e.NextFollowUp||'')+'"></div>' +
+        '<div><label>Total Shipment Weight (kg)</label><input id="xWeight" type="number" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 125.5" value="'+esc(weightStr_(e.ShipmentWeight))+'"></div>' +
+        '<div><label>Order Qty (metres)</label><input id="xQty" type="number" min="0" inputmode="decimal" value="'+esc(e.Qty||'')+'"></div>' +
+        '<div><label>Timeline</label><select id="xTimeline"><option value="">--</option>'+opts(META.timelines, e.Timeline)+'</select></div>' +
+        '<div><label>Escalate to</label><select id="xEsc"><option value="">None</option>'+opts(META.escalations, e.Escalation)+'</select>'+
+          (escHint_(e)?'<div class="sub">💡 Suggested: '+escHint_(e)+'</div>':'')+'</div>' +
+      '</div>' +
+      '<div style="margin-top:10px"><label>Requirement</label><textarea id="xReq" rows="2">'+esc(e.Requirement||'')+'</textarea></div>' +
+      '<div style="margin-top:14px;display:flex;gap:10px"><button class="btn green" id="xSave" onclick="commitEdit()">Save changes</button><button class="btn ghost" onclick="renderDetail(CURRENT)">Cancel</button></div>';
+      
+    document.getElementById('modalBody').innerHTML = html;
+  }
+
+  function commitEdit(){
+    var phone = val('xPhone');
+    if(phone && !isValidPhone(phone)){ toast('Phone number 10 digit ka hona chahiye'); return; }
+
+    var weight = val('xWeight').trim();
+    if(weight && (isNaN(Number(weight)) || Number(weight) < 0)){ toast('Total weight must be a positive number (kg)'); return; }
+
+    var b = document.getElementById('xSave');
+    b.disabled = true;
+    b.innerHTML = '<span class="spin"></span>';
+
+    var p = {
+      id: CURRENT.EnqID,
+      customer: val('xCust'),
+      company: val('xComp'),
+      phone: val('xPhone'),
+      email: val('xEmail'),
+      
+      gst: val('xGST'),
+      pincode: val('xPincode'),
+      district: val('xDistrict'),
+      state: val('xState'),
+      city: val('xCity'),
+      
+      source: val('xSource'),
+      priority: val('xPri'),
+      leadBy: val('xLead'),
+      nextFollowUp: val('xNext'),
+      requirement: val('xReq'),
+      qty: val('xQty'), timeline: val('xTimeline'), escalation: val('xEsc'),
+      shipmentWeight: weight
+    };
+
+    google.script.run.withSuccessHandler(function(r){
+      if(r.ok) { 
+        toast(r.msg||'Updated successfully'); 
+        refreshAll(); 
+        openDetail(CURRENT.EnqID); 
+      }
+      else { 
+        toast(r.msg); 
+        b.disabled = false; 
+        b.innerHTML = 'Save changes'; 
+      }
+    }).editEnquiry(p, AUTH_TOKEN);
+  }
+
+  function fetchPincodeEdit() {
+    fetchPincodeInto('xPincode', 'xDistrict', 'xState', 'xCity');
+  }
+
+  // PDF escalation triggers: custom/technical or >1000m bulk -> Proprietor; plans to visit -> Shop Floor.
+  function escHint_(e){
+    var t = ((e.Requirement||'')+' '+(e.Notes||'')).toLowerCase();
+    if (/custom|dyed|embroider|dupion/.test(t) || Number(e.Qty) > 1000) return 'Proprietor';
+    if (/visit|store|shop|aaunga|aayenge/.test(t)) return 'Shop Floor';
+    return '';
+  }
+
+  function stageForm(stage){
+    var h='';
+    if(stage==='Won') h='<div><label>Invoice Number *</label><input id="sInv" value="'+esc((CURRENT||{}).InvoiceNo||'')+'" placeholder="e.g. INV-0123"></div>';
+    if(stage==='Quoted') h='<div class="grid2"><div><label>Quote No</label><input id="sQNo" value="'+(META.quotePrefix||'')+'"></div><div><label>Next FU</label><input id="sNext" type="date"></div></div>';
+    if(stage==='Lost') h='<div><label>Lost Reason</label><select id="sReason" onchange="document.getElementById(\'sReasonOther\').style.display=this.value===\'Other\'?\'\':\'none\'">'+
+        ['Price High','Wrong Product','No Requirement','Duplicate Lead','Fake Lead','Wrong Number','Competitor','Customer Not Responding','Requirement Later','Other'].map(function(o){return '<option>'+o+'</option>';}).join('')+
+      '</select><input id="sReasonOther" placeholder="Specify reason" style="display:none;margin-top:6px"></div>';
+    // Prefilled from the current record so re-confirming Dispatched (e.g. to correct one field)
+    // doesn't blank out the dispatch details that were already saved.
+    if(stage==='Dispatched'){
+      var d = CURRENT || {};
+      h='<div class="grid3">'+
+          '<div><label>Dispatch Date</label><input id="sDDate" type="date" value="'+esc(d.DispatchDate||'')+'"></div>'+
+          '<div><label>Transport / Docket</label><input id="sDInfo" value="'+esc(d.DispatchInfo||'')+'"></div>'+
+          '<div><label>Total Weight (kg)</label><input id="sDWeight" type="number" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 125.5" value="'+esc(weightStr_(d.ShipmentWeight))+'"></div>'+
+        '</div>';
+    }
+    if(stage==='Closed') h='<div class="grid2"><div><label>Feedback Rating</label><select id="sRate"><option>5</option><option>4</option><option>3</option><option>2</option><option>1</option></select></div><div><label>Feedback Note</label><input id="sFNote"></div></div>';
+    h+='<div style="margin-top:10px"><button class="btn green sm" onclick="commitStage(\''+stage+'\')">Confirm '+stage+'</button></div>';
+    document.getElementById('stageForm').innerHTML=h;
+  }
+
+  function commitStage(stage){
+    var p={id:CURRENT.EnqID,stage:stage};
+    if(stage==='Quoted'){ p.quoteNo=val('sQNo'); p.nextFollowUp=val('sNext'); }
+    if(stage==='Won'){ p.invoiceNo=val('sInv').trim(); if(!p.invoiceNo){ toast('Invoice Number daalna zaroori hai'); return; } }
+    if(stage==='Lost'){ var lr=val('sReason'); if(lr==='Other'){ var lo=val('sReasonOther').trim(); lr=lo?('Other: '+lo):'Other'; } p.lostReason=lr; }
+    if(stage==='Dispatched'){
+      var w = val('sDWeight').trim();
+      if (w && (isNaN(Number(w)) || Number(w) < 0)){ toast('Total weight must be a positive number (kg)'); return; }
+      p.dispatchDate=val('sDDate'); p.dispatchInfo=val('sDInfo'); p.shipmentWeight=w;
+    }
+    if(stage==='Closed'){ p.feedbackRating=val('sRate'); p.feedbackNote=val('sFNote'); }
+    google.script.run.withSuccessHandler(function(r){
+      toast(r.msg||'Updated'); closeModal(); refreshAll();
+      if(document.getElementById('v-pipe').classList.contains('active')) loadPipe();
+    }).moveStage(p, AUTH_TOKEN);
+  }
+
+  function renderTimeline(history){
+    if(!history || !history.length){
+      return `
+        <div class="timeline-card">
+          <h3>📜 Activity Timeline</h3>
+          <div class="empty">
+            No communication logged yet.
+          </div>
+        </div>
+      `;
+    }
+
+    function modeIcon(mode){
+      switch((mode||"").toLowerCase()){
+        case "call": return "📞";
+        case "whatsapp": return "💬";
+        case "email": return "✉️";
+        case "visit": return "🤝";
+        default: return "📝";
+      }
+    }
+
+    var html='';
+
+    history.forEach(function(h){
+      html +=
+      '<div class="hist">'+
+          '<div style="display:flex;justify-content:space-between">'+
+              '<b>'+
+              modeIcon(h.mode)+' '+
+              esc(h.mode||"Activity")+
+              '</b>'+
+              '<span class="sub">'+
+              esc(h.date||"")+
+              '</span>'+
+          '</div>'+
+          '<div style="margin-top:8px">'+
+          esc(h.outcome || h.note || "")+
+          '</div>'+
+          (h.by
+              ?'<div class="sub" style="margin-top:8px">👤 '+esc(h.by)+'</div>'
+              :''
+          )+
+          (h.next
+              ?'<div style="margin-top:8px"><span class="badge badge-info">Next : '+esc(h.next)+'</span></div>'
+              :''
+          )+
+      '</div>';
+    });
+
+    return `
+        <div class="timeline-card">
+            <h3>📜 Activity Timeline</h3>
+            ${html}
+        </div>
+    `;
+  }
+
+  // Order FMS: opens the prefilled Google Form (CRM -> PI -> payment -> dispatch tracker)
+  var ORDER_FORM_BASE_ = 'https://docs.google.com/forms/d/e/1FAIpQLScpsK44h2EAIUteLBXL5VJkFGDfazp47LMiwimZ-XvsfejZ-Q/viewform';
+  function orderFormUrl_(e){
+    var q = {
+      '1781510432': e.LeadBy,
+      '219369210': e.Customer || e.Company,
+      '785325842': e.Phone,
+      '364509394': e.EnqID,
+      '906940518': [e.City, e.State].filter(Boolean).join(', '),
+      '95640800': e.OrderValue,
+      '806799553': e.Requirement,
+      '1478263900': e.Notes
+    };
+    var p = ['usp=pp_url'];
+    Object.keys(q).forEach(function(k){ if (q[k]) p.push('entry.'+k+'='+encodeURIComponent(q[k])); });
+    return ORDER_FORM_BASE_+'?'+p.join('&');
+  }
+
+  function renderDetail(e){
+    function row(k,v,cls){ return v?('<div class="detrow"><span class="k">'+k+'</span><span class="v'+(cls?' '+cls:'')+'">'+esc(v)+'</span></div>'):''; }
+
+    var waBtns='';
+    if(e.waWelcome) waBtns+='<a class="btn green sm wa" target="_blank" href="'+e.waWelcome+'">📲 Welcome WhatsApp</a> ';
+    if(e.waFollow)  waBtns+='<a class="btn ghost sm wa" target="_blank" href="'+e.waFollow+'">Follow-up WhatsApp</a>';
+
+    var html = "";
+
+    html += `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:15px;">
+        ${renderCustomerHeader(e)}
+        <div class="actions">
+            <button class="btn ghost sm" onclick="closeModal()">✕ Close</button>
+        </div>
+    </div>
+    `;
+
+    html +='<div class="info-grid">'+
+             '<div class="info-card">'+'<h4>📞 Contact Information</h4>'+row('Phone',e.Phone,'v-phone')+row('Email',e.Email)+row('GST No.',e.GST)+row('Address',(e.City||'')+(e.Pincode?(' - '+e.Pincode):''))+
+               (e.PhotoUrl?renderDocRow_(e.PhotoUrl):'')+'</div>'+
+             '<div class="info-card">'+'<h4>💼 Business Information</h4>'+row('Company',e.Company)+row('Source',e.Source)+row('Lead By',e.LeadBy)+row('Priority',e.Priority)+row('Grade',e.Grade)+row('Qty / Timeline',(e.Qty?e.Qty+' m':'')+(e.Timeline?' · '+e.Timeline:''))+row('Escalation',e.Escalation)+row('Quote No.',e.QuoteNo)+row('Invoice No.',e.InvoiceNo)+row('Last Follow-up',e.LastContact)+row('Next Follow-up',e.NextFollowUp)+'</div>'+
+             '<div class="info-card">'+'<h4>📝 Requirement</h4>'+row('Requirement',e.Requirement)+row('Dispatch',(e.DispatchDate||'')+(e.DispatchInfo?(' · '+e.DispatchInfo):''))+row('Total Weight',weightStr_(e.ShipmentWeight)?(weightStr_(e.ShipmentWeight)+' kg'):'')+row('Lost Reason',e.LostReason)+row('Notes',e.Notes)+'</div>'+
+           '</div>';
+
+    if (e.PhotoUrl){
+      html += '<div id="pdfPreviewBox" class="hidden" style="margin:0 0 14px"><iframe id="pdfPreviewFrame" style="width:100%;height:460px;border:1px solid var(--line);border-radius:10px" src=""></iframe></div>';
+    }
+
+    waBtns+=' <a class="btn sm" target="_blank" href="'+orderFormUrl_(e)+'">📝 Order FMS Form</a>';
+
+    html += '<div style="margin-bottom:10px" class="actions">'+waBtns+'</div>';
+
+    html += renderCallCard(e);
+
+    html += '<div class="card" style="padding:14px"><b>Move stage</b><div class="actions" style="margin-top:8px">'+
+        '<button class="btn sm" onclick="stageForm(\'Quoted\')">→ Quoted</button>'+
+        '<button class="btn sm" onclick="commitStage(\'Follow-up\')">→ Follow-up</button>'+
+        '<button class="btn green sm" onclick="stageForm(\'Won\')">✓ Won</button>'+
+        '<button class="btn red sm" onclick="stageForm(\'Lost\')">✕ Lost</button>'+
+        '<button class="btn sm" onclick="stageForm(\'Dispatched\')">📦 Dispatched</button>'+
+        '<button class="btn sm" onclick="stageForm(\'Closed\')">★ Close+Feedback</button>'+
+        '</div><div id="stageForm" style="margin-top:10px"></div></div>';
+
+    html += renderTimeline(e.history);
+      
+    document.getElementById('modalBody').innerHTML=html;
+    loadOmsCard(e);
+  }
+</script>
