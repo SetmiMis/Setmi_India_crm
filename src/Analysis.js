@@ -10,11 +10,28 @@ function getAnalysis(token){
   return analysisBuild_(requireAuth_(token));
 }
 
-/* PUBLIC share link (no login): ?page=analysis&key=<ANALYSIS_SHARE_KEY_>. Marketing view only — the lead-owner
+/* PUBLIC share link (no login): ?page=analysis&key=<key>. Marketing view only — the lead-owner
    name and the follow-up speed / idle / repeat columns are blanked, and there are no names or phones in the rows.
-   To revoke or rotate the link, change the key below and redeploy. */
-const ANALYSIS_SHARE_KEY_ = '__REDACTED_ANALYSIS_SHARE_KEY__'; // REDACTED in git — see src/REDACTIONS.md
-function analysisKeyOk_(k){ return !!k && String(k) === ANALYSIS_SHARE_KEY_; }
+   The key lives in Script property ANALYSIS_SHARE_KEY (was hardcoded here — SEC-04). Set or rotate it from the
+   Sales FMS menu -> Set Analysis Share Link Key; no redeploy needed. Unset = every share link is rejected. */
+const ANALYSIS_SHARE_KEY_PROP_ = 'ANALYSIS_SHARE_KEY';
+function analysisKeyOk_(k){
+  const secret = PropertiesService.getScriptProperties().getProperty(ANALYSIS_SHARE_KEY_PROP_);
+  return !!secret && !!k && String(k) === secret;
+}
+function setAnalysisShareKeyFromMenu(){
+  requireOwnerOrSheetUi_();
+  const ui = SpreadsheetApp.getUi();
+  const res = ui.prompt('Set Analysis Share Link Key',
+    'Paste the key for ?page=analysis&key=… (at least 16 characters). Leave blank to disable the share link.',
+    ui.ButtonSet.OK_CANCEL);
+  if (res.getSelectedButton() !== ui.Button.OK) return;
+  const key = res.getResponseText().trim();
+  if (key && key.length < 16){ ui.alert('Key must be at least 16 characters.'); return; }
+  const props = PropertiesService.getScriptProperties();
+  if (key) props.setProperty(ANALYSIS_SHARE_KEY_PROP_, key); else props.deleteProperty(ANALYSIS_SHARE_KEY_PROP_);
+  ui.alert(key ? 'Share link key saved.' : 'Share link disabled.');
+}
 function getAnalysisShared(key){
   if (!analysisKeyOk_(key)) throw new Error('Invalid link.');
   return analysisBuild_({role:'admin'}).map(function(r){ r[7] = '—'; r[14] = ''; r[15] = ''; r[16] = 1; return r; });

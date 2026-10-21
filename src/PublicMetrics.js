@@ -11,6 +11,7 @@ function publicMetricsKeyOk_(key){
 
 // Run once (Apps Script editor, or `clasp run setPublicMetricsKey -p '["<key>"]'`).
 function setPublicMetricsKey(key){
+  requireOwnerOrSheetUi_();
   if (!key || String(key).length < 16) throw new Error('Use a key of at least 16 characters.');
   PropertiesService.getScriptProperties().setProperty('PUBLIC_METRICS_KEY', String(key));
   return 'ok';

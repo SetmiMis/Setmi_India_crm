@@ -39,6 +39,9 @@ the comments.
 - **Backend:** `getConfigMeta`, `login`, `checkPin`, `whoAmI`, `requestPasswordReset`.
 - **Result:** a token in `localStorage.fms_session`, valid for 6 h (sliding) in CacheService.
 - **Failure:** the message "Session expired — please reload…". The client returns to the gate.
+- **Pending change (SEC-02, not deployed):** the PIN path stops working once user accounts exist,
+  unless `ALLOW_PIN_LOGIN = YES`, and the PIN link is hidden. All sessions end once at deploy
+  (cache prefix bump).
 
 ### 2. Dashboard (`dashboard.js`, `dashboardCharts.js`)
 

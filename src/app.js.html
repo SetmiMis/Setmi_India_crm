@@ -41,7 +41,7 @@ function tryPin(){
       saveSession_(AUTH_TOKEN, CURRENT_USER);
       openApp();
     }
-    else { document.getElementById('pinErr').textContent='Galat PIN'; }
+    else { document.getElementById('pinErr').textContent = res.msg || 'Galat PIN'; }
   }).checkPin(val('pinInput'));
 }
 

@@ -8,9 +8,11 @@
 | `npm run check:syntax` | Every `src/*.js` and every inline `<script>` in `src/*.html` parses (scriptlets replaced with a placeholder) | Runtime errors, undefined references |
 | `npm run check:secrets` | Known secret shapes (redacted literals reintroduced, private keys, tokens, service-account JSON) are absent from tracked files | Arbitrary secrets (gitleaks in CI covers more) |
 | `tests/unit/business-rules.test.js` (12 tests) | Pure business rules: stages, grade matrix, phone key, state normalization, follow-up cadence, follow-up status, ID generation (incl. BUG-005 pinned), parsing, product mapping, password hashing, row mapping | Anything touching Sheets/Cache/Lock/Drive |
-| `tests/unit/contracts.test.js` (5 tests) | Every `google.script.run.fn` the client calls exists as a public server function; `include()` targets exist; `doGet` templates exist; menu items/trigger handlers exist; manifest settings are the documented ones | Correct arguments/return shapes |
+| `tests/unit/security.test.js` (9 tests) | SEC-01 guard (anonymous, non-owner, menu and owner cases; guarded setters refuse before writing; digest trigger check), SEC-02 PIN policy and no seeded default, SEC-04 share key from properties, SEC-11 `badge()` escaping | Real `getUi()` / `getActiveUser()` behaviour in Apps Script (staging check R22) |
+| `tests/unit/contracts.test.js` (6 tests) | Every `google.script.run.fn` the client calls exists as a public server function; **every public server function authenticates, is guarded, or is in the reviewed anonymous list (SEC-01)**; `include()` targets exist; `doGet` templates exist; menu items/trigger handlers exist; manifest settings are the documented ones | Correct arguments/return shapes |
 
-Results on 2026-10-20 (local, Node 22): **17/17 tests pass**. 35 files/blocks were syntax-checked
+Results on 2026-10-20 (local, Node 22): **17/17 tests pass**. After the SEC-01/02/04/11 change
+(2026-10-21): **27/27**. 35 files/blocks were syntax-checked
 with 0 failures. The secret scan is clean.
 
 The gitleaks job and the CI run on GitHub **have not run yet**, because nothing has been pushed.

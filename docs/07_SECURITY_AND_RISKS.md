@@ -33,17 +33,17 @@ and no PIN or password was tried. "Confirmed (code)" means the code path is unam
 
 | ID | Severity | Status | Finding |
 |---|---|---|---|
-| <a id="sec-01"></a>SEC-01 | **Critical** | Confirmed (code + live API list) | **Data-modifying functions are callable with no login** (detail below) |
-| SEC-02 | **High** | Confirmed (code); PIN value unknown | Shared Admin PIN is a permanent admin backdoor alongside user accounts |
+| <a id="sec-01"></a>SEC-01 | **Critical** | Confirmed (code + live API list). Fixed in code (`fix/sec-01-02-04-11`); **not deployed** | **Data-modifying functions are callable with no login** (detail below) |
+| SEC-02 | **High** | Confirmed (code); PIN value unknown. Fixed in code (`fix/sec-01-02-04-11`); **not deployed** | Shared Admin PIN is a permanent admin backdoor alongside user accounts |
 | SEC-03 | **High** | Confirmed (live metadata); effective public exposure unconfirmed | Workbook and script sharing is broad |
-| SEC-04 | Medium | Confirmed (code) | Analysis share key hardcoded in source |
+| SEC-04 | Medium | Confirmed (code). Fixed in code (`fix/sec-01-02-04-11`); **not deployed**; key must be set in Script Properties before deploy | Analysis share key hardcoded in source |
 | SEC-05 | **High** | Confirmed (live) | Old Deployment B still live, anonymous, PIN-only, older server code |
 | SEC-06 | Medium | Confirmed (code) | Authorization gaps for signed-in users |
 | SEC-07 | Medium | Confirmed (code) | Public endpoints leak data and accept unlimited submissions |
 | SEC-08 | Medium | Confirmed (code) | Customer PDFs are shared "anyone with the link" |
 | SEC-09 | Low–Med | Confirmed (code) | Weak credential handling |
 | SEC-10 | Low | Confirmed (code) | `XFrameOptionsMode.ALLOWALL` on every page |
-| SEC-11 | Low | Suspected | Stored HTML injection through unvalidated `Stage` |
+| SEC-11 | Low | Suspected. Fixed in code (`fix/sec-01-02-04-11`); **not deployed** | Stored HTML injection through unvalidated `Stage` |
 | SEC-12 | Low | Confirmed (code) | Third-party scripts |
 | SEC-13 | Info | Confirmed (code) | PII leaves the system in URLs and email |
 | SEC-14 | Medium | Confirmed (live data) | Weak audit trail |
@@ -81,6 +81,16 @@ The `*FromMenu` tools that call `getUi()` first fail harmlessly in web context.
 2. Add `requireAuth_` plus an admin check to the remaining ones.
 3. Add a contract test listing the allowed anonymous functions.
 
+**Implemented (not yet deployed):** renaming was avoided, because menus and the already-installed
+triggers point at the current names. Instead every maintenance function, setter and trigger
+setup function now starts with `requireOwnerOrSheetUi_()`. It allows only:
+- the spreadsheet UI (`SpreadsheetApp.getUi()` works only there), or
+- the script owner (active user = effective user: editor Run, `clasp run`, their own triggers).
+
+`sendDailyDigest(e)` also accepts a genuine project trigger event, matched by `triggerUid`.
+`contracts.test.js` fails if any public function is neither authenticated, guarded, key-checked,
+nor in the reviewed `ANONYMOUS_BY_DESIGN` list.
+
 ### SEC-02 — shared Admin PIN (High)
 
 - `checkPin(pin)` grants **admin** whenever `ADMIN_PIN` is set, even though user accounts now exist.
@@ -90,8 +100,20 @@ The `*FromMenu` tools that call `getUi()` first fail harmlessly in web context.
   source (SEC-03) knows it.
 - [?] Whether the live PIN was ever changed is unknown. The owner should check Script Properties.
 
-**Fix:** remove the PIN path, or blank `ADMIN_PIN` (the users path then works alone). Rotate it
-in any case.
+**Implemented (not yet deployed):**
+- Once any active user exists, `checkPin` refuses even the correct PIN, unless the owner sets
+  Script property `ALLOW_PIN_LOGIN = YES`. Break-glass without the PIN: spreadsheet menu → Add User.
+- The hardcoded default-PIN seed is removed.
+- Found during the fix: with `ADMIN_PIN` **blank**, the old `checkPin` issued an admin session for
+  any input, even with users configured. It now refuses whenever PIN login is off.
+- The session cache prefix is bumped (`fms_auth2_`), so every existing session, including
+  long-lived PIN sessions, ends once at deploy.
+- `getConfigMeta().pinRequired` now means "show the login gate"; the PIN link is hidden when PIN
+  login is off.
+
+Note: the earlier advice to *blank* `ADMIN_PIN` was unsafe on the current production code. The
+client opens the app without a login when `pinRequired` is false, so every call would then fail.
+Rotate the PIN anyway.
 
 ### SEC-03 — broad sharing of the workbook and script (High)
 
@@ -120,9 +142,11 @@ Share → General access.
 ### SEC-04 — hardcoded analysis share key (Medium)
 
 `ANALYSIS_SHARE_KEY_` is a literal in `Analysis.js`. Anyone with script view access has it.
-Rotating it requires a redeploy. It is redacted in git (`src/REDACTIONS.md`).
+Rotating it requires a redeploy. It was redacted in git (`src/REDACTIONS.md`).
 
-**Fix:** move it to Script Properties and rotate it.
+**Implemented (not yet deployed):** the key is read from Script property `ANALYSIS_SHARE_KEY`
+(fail closed when unset) and set from the menu → Set Analysis Share Link Key. Rotating it no
+longer needs a redeploy. **Deploying without setting the property disables every existing share link.**
 
 ### SEC-05 — stale Deployment B (High)
 
@@ -170,7 +194,8 @@ stored in the sheet (which is itself broadly shared).
 ### SEC-10 / SEC-11 / SEC-12 / SEC-13 (Low / Info)
 
 - **SEC-10:** `ALLOWALL` permits clickjacking-style framing.
-- **SEC-11:** `moveStage` stores any `stage` string, and `badge(st)` writes it into `innerHTML`
+- **SEC-11 (fixed in code, not deployed: `moveStage` rejects unknown stages; `badge()` escapes):**
+  `moveStage` stored any `stage` string, and `badge(st)` wrote it into `innerHTML`
   unescaped. Only authenticated users can set it. The impact is limited by the
   googleusercontent sandbox, but it could steal the `localStorage` token. Note also `pri-'+Priority`
   in a class attribute.

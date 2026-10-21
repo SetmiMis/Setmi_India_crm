@@ -1,24 +1,31 @@
-# Redactions in `src/`
+# Redactions in `src/` (history) and deploy prerequisites
 
-`src/` is a verbatim export of the production Apps Script project **"E2O FMS"** taken on
-**2026-10-20** (Drive API export `application/vnd.google-apps.script+json`; project last modified
-2026-10-07 05:49 UTC). It has exactly **two** deliberate differences from production. In both,
-a credential literal was replaced with a placeholder so it never enters git history:
+## History
 
-| File | Line (approx.) | Production value | Placeholder in git |
-|---|---|---|---|
-| `src/Analysis.js` | 16 | the live `?page=analysis&key=…` share key | `__REDACTED_ANALYSIS_SHARE_KEY__` |
-| `src/Code.js` | 1351 | the default Admin PIN that `migrateAdminPinToProperties_()` seeds into Script Properties | `__REDACTED_DEFAULT_PIN__` |
+The baseline export of the production project "E2O FMS" (2026-10-20, tag `baseline-2026-10-20`,
+commit `2a27f0f`) differed from production in exactly two places. In each, a credential literal was
+replaced with a placeholder:
 
-File naming: Apps Script `.gs` files are stored as `.js`, which is how `clasp pull` writes them.
-Apps Script treats both the same way.
+| File | Production value | Placeholder in the baseline |
+|---|---|---|
+| `src/Analysis.js` | the live `?page=analysis&key=…` share key (`ANALYSIS_SHARE_KEY_`) | `__REDACTED_ANALYSIS_SHARE_KEY__` |
+| `src/Code.js` | the default Admin PIN that `migrateAdminPinToProperties_()` seeded | `__REDACTED_DEFAULT_PIN__` |
 
-## ⚠ Do not `clasp push` this tree as-is
+**Both placeholders are gone** since the SEC-01/02/04 change:
+- The share key is read from Script property `ANALYSIS_SHARE_KEY`.
+- The default-PIN seed was removed.
 
-Pushing `src/` unchanged would replace the live share key with the placeholder, which breaks the
-existing public analysis link. It would also change the seed PIN. Before the first push from git,
-an approved change must move both values out of source and into Script Properties (for example
-`ANALYSIS_SHARE_KEY`). After that the placeholders go away and this file can be deleted. See
-`docs/13_ENVIRONMENTS_AND_DEPLOYMENT.md` and `docs/07_SECURITY_AND_RISKS.md` (SEC-04).
+There are no redactions in `src/` any more. When diffing against a `clasp pull` of a production
+project that does not have that change yet, expect these two spots (and the rest of that change)
+to differ.
 
-`npm run check:secrets` fails CI if either literal is ever reintroduced.
+## Before the first `clasp push` / deploy of this tree
+
+1. Set Script property **`ANALYSIS_SHARE_KEY`**, either from the menu (Set Analysis Share Link Key)
+   or in Project Settings. Use the current live key to keep existing share links working, or a
+   new key of at least 16 characters to rotate.
+2. Decide on **`ALLOW_PIN_LOGIN`**. Leave it unset to disable the shared PIN once users exist, or
+   set it to `YES` to keep the PIN working.
+3. Expect every user to be signed out once, because the session cache prefix was bumped.
+
+`npm run check:secrets` fails CI if either old literal is ever reintroduced.

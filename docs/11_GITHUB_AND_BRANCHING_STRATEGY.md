@@ -11,9 +11,9 @@
 | Workflows | none |
 | Branch protection | not verified. The available tooling cannot read protection rules. The owner should check Settings → Branches |
 
-The audit work sits on the branch `docs/initial-audit`, as a **local commit only, not pushed**.
-It adds files and changes only `README.md`, from its single heading to the full README. History
-is preserved.
+The audit baseline was merged to `main` on 2026-10-21 by PR #1 (squash commit `2a27f0f`). The tag
+`baseline-2026-10-20` still has to be created on GitHub, because the session's git proxy refused
+tag pushes.
 
 ## Branch model
 

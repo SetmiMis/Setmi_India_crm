@@ -49,11 +49,12 @@ cp .clasp.json.example .clasp.json && edit scriptId   # .clasp.json is gitignore
 ### Before the first push from git (one time, needs approval)
 
 1. **Drift check.** Clone into a scratch directory and run `clasp pull` from production, then
-   diff against `src/`. Today the only expected differences are the two redactions in
-   `src/REDACTIONS.md`. Any other difference means someone edited in the editor after 2026-10-20.
-   Commit that drift before anything else.
-2. **Remove the redaction dependency.** Make an approved code change that reads the analysis share
-   key from Script Properties and removes the default-PIN literal. Then `src/` is deployable as-is.
+   diff against the `baseline-2026-10-20` state of `src/` (`main` at `2a27f0f`). The only expected
+   differences are the two redactions recorded in `src/REDACTIONS.md`. Any other difference means
+   someone edited in the editor after 2026-10-20. Commit that drift before anything else.
+2. **Redaction dependency: removed in code** by the SEC-01/02/04 change. Before deploying it, set
+   Script property `ANALYSIS_SHARE_KEY` (the current live key, or a new one to rotate) and decide on
+   `ALLOW_PIN_LOGIN`. `src/` is then deployable as-is.
 3. From then on, the rule is **no direct edits in the production editor**. Every change goes
    through a PR and `clasp push`. If an emergency editor edit happens, run `clasp pull` into a
    branch the same day.
