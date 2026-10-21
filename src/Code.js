@@ -171,6 +171,7 @@ function include(name){ return HtmlService.createHtmlOutputFromFile(name).getCon
 
 /* ----------------------------------------------------------- SETUP / MIGRATE */
 function setupSheets(){
+  requireOwnerOrSheetUi_();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   let enq = ss.getSheetByName(SHEETS.ENQ) || ss.insertSheet(SHEETS.ENQ);
@@ -239,7 +240,6 @@ function setupSheets(){
   backfillCustomers_();
   forcePhoneColumnsText_();
   forceTextColumns_();
-  migrateAdminPinToProperties_();
   ensureArchiveSheet_();
 
   const s1 = ss.getSheetByName('Sheet1');
@@ -290,6 +290,7 @@ function forceTextColumns_(){
 // manually (Sales FMS menu -> Fix Phone Formatting) if you see #ERROR! in a Phone column, or an
 // "X.trim is not a function" error approving a Pending entry.
 function fixPhoneFormatting(){
+  requireOwnerOrSheetUi_();
   let totalFixed = 0;
   ['ENQ','CUST','PEND'].forEach(function(key){
     const sh = sh_(key); if(!sh || sh.getLastRow()<2) return;
@@ -323,6 +324,7 @@ function fixPhoneFormatting(){
 // shouldn't still carry a "next follow-up" date, and editEnquiry() used to quietly repopulate one
 // if Priority happened to get edited afterwards (fixed at the source too).
 function clearPriorityOnClosedStages(){
+  requireOwnerOrSheetUi_();
   const sh = sh_('ENQ'); if(!sh || sh.getLastRow()<2) return;
   const map = colMap_(sh);
   if (map['Stage']===undefined) return;
@@ -475,6 +477,7 @@ function computeNextFollowUp_(priority, actualDateStr){
 // One-time/maintenance batch recompute for every open enquiry (menu: Sales FMS -> Recalculate Follow-up Dates).
 // Reads and writes NextFollowUp in a single pass so it stays fast even with thousands of rows.
 function recalculateAllNextFollowUps(){
+  requireOwnerOrSheetUi_();
   const sh = sh_('ENQ'); const data = sh.getDataRange().getValues(); const map = colMapFromRow_(data[0]);
   const col = map['NextFollowUp'];
   let updated = 0;
@@ -509,6 +512,7 @@ function onOpen(){
     .addItem('Stop Auto-Import', 'stopMetaLeadsImportTrigger')
     .addSeparator()
     .addItem('Change Admin PIN', 'setAdminPin')
+    .addItem('Set Analysis Share Link Key', 'setAnalysisShareKeyFromMenu')
     .addItem('Add User', 'addUserFromMenu')
     .addItem('Check State/Pincode Data Quality', 'debugStateSampleFromMenu')
     .addItem('Warm Map District Geocoding', 'warmDistrictGeoFromMenu')
@@ -571,6 +575,7 @@ function fixCityStateMixup_(){
   return {ok:true, moved:moved, corrected:corrected, cleared:cleared};
 }
 function fixCityStateMixupFromMenu(){
+  requireOwnerOrSheetUi_();
   const r = fixCityStateMixup_();
   SpreadsheetApp.getUi().alert('Fix State Name Stuck in City/District',
     r.moved+' row(s) fixed — a state name (typos included) found in City/District, with State blank, was moved into State.\n'+
@@ -644,6 +649,7 @@ function findStateFromCityNeeded_(){
 // itself has them as separate strings; that's fine for the geocoder (case/whitespace-insensitive
 // lookup, and Nominatim tolerates most real-world spelling variants) but useful to actually see.
 function checkStateFromCityFromMenu(){
+  requireOwnerOrSheetUi_();
   const found = findStateFromCityNeeded_();
   const cache = cityStateCache_();
   const cities = Object.keys(found.needed);
@@ -659,6 +665,7 @@ function checkStateFromCityFromMenu(){
     SpreadsheetApp.getUi().ButtonSet.OK);
 }
 function fixStateFromCityFromMenu(){
+  requireOwnerOrSheetUi_();
   const needed = findStateFromCityNeeded_().needed;
   if (!Object.keys(needed).length){ SpreadsheetApp.getUi().alert('Nothing to do — no blank-State rows with a City value.'); return; }
   const resolved = resolveCityState_(needed);
@@ -720,6 +727,7 @@ function findBugAutoAssignedLeads_(){
   return hits;
 }
 function checkBugAutoAssignedFromMenu(){
+  requireOwnerOrSheetUi_();
   const hits = findBugAutoAssignedLeads_();
   const sample = hits.slice(0,20).map(function(h){ return h.id+' — '+h.customer+' (currently: '+h.leadBy+')'; }).join('\n') || '(none)';
   SpreadsheetApp.getUi().alert('Bug-Auto-Assigned Leads',
@@ -729,6 +737,7 @@ function checkBugAutoAssignedFromMenu(){
     SpreadsheetApp.getUi().ButtonSet.OK);
 }
 function fixBugAutoAssignedFromMenu(){
+  requireOwnerOrSheetUi_();
   const hits = findBugAutoAssignedLeads_();
   if (!hits.length){ SpreadsheetApp.getUi().alert('Nothing to fix — 0 matching leads found.'); return; }
   const sh = sh_('ENQ'); const data = sh.getDataRange().getValues(); const map = colMapFromRow_(data[0]);
@@ -789,6 +798,7 @@ function findArchivableLeads_(){
 // Enquiries sheet, matched by phone number (normalized to last 10 digits — handles a leading
 // 0/91/+91 difference between the two sheets). Read-only, changes nothing. Delete after use.
 function reconcileDataFromMenu(){
+  requireOwnerOrSheetUi_();
   const ui = SpreadsheetApp.getUi();
   const srcRes = ui.prompt('Reconcile Data — Step 1/2', 'Paste the "Data Reconciliation" sheet URL or ID:', ui.ButtonSet.OK_CANCEL);
   if (srcRes.getSelectedButton() !== ui.Button.OK) return;
@@ -933,6 +943,7 @@ function reconcileDataCore_(srcUrl, tgtUrl){
 // header row, so there's no reliable name to auto-detect them by (Phone comes from the
 // reconciliation's own MatchedPhone column, which is always populated).
 function pushNotFoundToEnquiriesFromMenu(){
+  requireOwnerOrSheetUi_();
   const ui = SpreadsheetApp.getUi();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const candidates = ss.getSheets().filter(function(s){ return /^Reconciliation Results/.test(s.getName()); });
@@ -1001,6 +1012,7 @@ function pushNotFoundToEnquiriesFromMenu(){
 }
 // TEMP DEBUG — checks how a single phone number is stored/matched against Enquiries.
 function debugPhoneMatchFromMenu(){
+  requireOwnerOrSheetUi_();
   const ui = SpreadsheetApp.getUi();
   const res = ui.prompt('Enter the 10-digit phone to check:', ui.ButtonSet.OK_CANCEL);
   if (res.getSelectedButton() !== ui.Button.OK) return;
@@ -1027,6 +1039,7 @@ function debugPhoneMatchFromMenu(){
     ui.ButtonSet.OK);
 }
 function debugRowStateFromMenu(){
+  requireOwnerOrSheetUi_();
   const ui = SpreadsheetApp.getUi();
   const res = ui.prompt('Debug Row State', 'Enter the EnqID (e.g. SETMI-ENQ-1232):', ui.ButtonSet.OK_CANCEL);
   if (res.getSelectedButton() !== ui.Button.OK) return;
@@ -1054,6 +1067,7 @@ function debugRowStateFromMenu(){
     ui.ButtonSet.OK);
 }
 function checkDataCountsFromMenu(){
+  requireOwnerOrSheetUi_();
   const enqSh = sh_('ENQ');
   const enqTotal = Math.max(0, enqSh.getLastRow()-1);
   const active = getAllEnquiries_().length; // Active=YES rows only, same set Pipeline/Dashboard/etc read
@@ -1065,6 +1079,7 @@ function checkDataCountsFromMenu(){
     SpreadsheetApp.getUi().ButtonSet.OK);
 }
 function checkArchivableFromMenu(){
+  requireOwnerOrSheetUi_();
   const found = findArchivableLeads_();
   SpreadsheetApp.getUi().alert('Archivable Leads',
     found.rows.length+' closed lead(s) (Won/Lost/Dispatched/Closed) are more than '+ARCHIVE_MONTHS_+' months old and can be archived.\n\n'+
@@ -1072,6 +1087,7 @@ function checkArchivableFromMenu(){
     SpreadsheetApp.getUi().ButtonSet.OK);
 }
 function archiveOldClosedLeadsFromMenu(){
+  requireOwnerOrSheetUi_();
   const found = findArchivableLeads_();
   if (!found.rows.length){ SpreadsheetApp.getUi().alert('Nothing to archive — 0 matching leads found.'); return; }
 
@@ -1103,6 +1119,7 @@ function archiveOldClosedLeadsFromMenu(){
   } finally { lock.releaseLock(); }
 }
 function restoreLeadFromArchiveFromMenu(){
+  requireOwnerOrSheetUi_();
   const ui = SpreadsheetApp.getUi();
   const res = ui.prompt('Restore Lead from Archive', 'Enter the EnqID to restore (e.g. SETMI-ENQ-1234):', ui.ButtonSet.OK_CANCEL);
   if (res.getSelectedButton() !== ui.Button.OK) return;
@@ -1129,6 +1146,7 @@ function restoreLeadFromArchiveFromMenu(){
 // Bulk undo for "Archive Old Closed Leads" — moves every row in Archive back into Enquiries in one
 // batch (not one at a time), then empties Archive down to just its header.
 function restoreAllFromArchiveFromMenu(){
+  requireOwnerOrSheetUi_();
   const ui = SpreadsheetApp.getUi();
   const archiveSh = sh_('ARCHIVE');
   const count = archiveSh ? Math.max(0, archiveSh.getLastRow()-1) : 0;
@@ -1229,6 +1247,7 @@ function buildWorkbookAuditReport_(){
   };
 }
 function runAuditFromMenu(){
+  requireOwnerOrSheetUi_();
   const report = buildWorkbookAuditReport_();
   const lines = [
     'Sales FMS Audit Report',
@@ -1252,6 +1271,7 @@ function runAuditFromMenu(){
   SpreadsheetApp.getUi().alert(lines.join('\n'));
 }
 function debugStateSampleFromMenu(){
+  requireOwnerOrSheetUi_();
   const r = debugStateSample_(getAllEnquiries_());
   const top = r.topUnresolvedStateSpellings.map(function(o){ return o.state+': '+o.count; }).join('\n') || '(none)';
   const fuzzy = r.topFuzzyFixableSpellings.map(function(o){ return o.state+': '+o.count; }).join('\n') || '(none)';
@@ -1335,7 +1355,10 @@ function waLinkFollow_(e){  return e.Phone ? 'https://wa.me/'+waNum_(e.Phone)+'?
    on every subsequent call. INTERNAL_BYPASS_ lets trusted server-only callers (daily digest, report
    export) through without a token — it's a random value generated at runtime and never sent to the
    client, so a page visitor can never guess or replay it. */
-const AUTH_CACHE_PREFIX_ = 'fms_auth_';
+// Bumped from 'fms_auth_' when PIN login was restricted (SEC-02): every session issued before that
+// change — PIN sessions included, which otherwise stay alive forever on the 6h sliding TTL — is
+// invalidated once, and everyone signs in again.
+const AUTH_CACHE_PREFIX_ = 'fms_auth2_';
 const AUTH_TTL_SECONDS_ = 21600; // 6h sliding session (CacheService's max TTL)
 const INTERNAL_BYPASS_ = Utilities.getUuid();
 
@@ -1346,11 +1369,41 @@ const INTERNAL_BYPASS_ = Utilities.getUuid();
 function adminPin_(){
   return PropertiesService.getScriptProperties().getProperty('ADMIN_PIN') || '';
 }
-function migrateAdminPinToProperties_(){
-  const props = PropertiesService.getScriptProperties();
-  if (props.getProperty('ADMIN_PIN') === null) props.setProperty('ADMIN_PIN', '__REDACTED_DEFAULT_PIN__'); // REDACTED in git — see src/REDACTIONS.md
+// The shared PIN always grants admin, so once per-user logins exist it is only honoured when the
+// owner explicitly opts in (Script property ALLOW_PIN_LOGIN = YES). Break-glass without it: the
+// spreadsheet menu -> Add User / Users sheet, which only workbook editors can reach.
+function pinLoginEnabled_(){
+  if (!adminPin_()) return false;
+  if (!anyUsersConfigured_()) return true;
+  return String(PropertiesService.getScriptProperties().getProperty('ALLOW_PIN_LOGIN')||'').toUpperCase() === 'YES';
+}
+
+/* ---------- MAINTENANCE GUARD
+   Menu tools, setters and trigger setup are top-level (menus/editor Run/clasp run need that), which
+   also makes them callable via google.script.run by anyone who opens the web app — it executes as
+   the owner for anonymous visitors (SEC-01). Allowed callers: the spreadsheet UI (menu click by a
+   workbook editor — getUi() throws in a web-app execution) or the script owner themselves (editor
+   Run, clasp run, their own triggers). An anonymous web visitor has an empty active user. */
+function isOwnerCaller_(){
+  const active = String(Session.getActiveUser().getEmail()||'').toLowerCase();
+  return !!active && active === String(Session.getEffectiveUser().getEmail()||'').toLowerCase();
+}
+function hasSheetUi_(){
+  try{ SpreadsheetApp.getUi(); return true; }catch(e){ return false; }
+}
+function requireOwnerOrSheetUi_(){
+  if (hasSheetUi_() || isOwnerCaller_()) return;
+  throw new Error('This action is only available from the spreadsheet menu.');
+}
+// A time-driven trigger passes an event carrying its triggerUid; a forged object from the browser
+// can't match one of this project's real trigger IDs.
+function isProjectTrigger_(e){
+  if (!e || !e.triggerUid) return false;
+  const uid = String(e.triggerUid);
+  return ScriptApp.getProjectTriggers().some(function(t){ return t.getUniqueId() === uid; });
 }
 function setAdminPin(){
+  requireOwnerOrSheetUi_();
   const ui = SpreadsheetApp.getUi();
   const res = ui.prompt('Set Admin PIN', 'Enter new PIN (leave blank to disable the PIN gate):', ui.ButtonSet.OK_CANCEL);
   if (res.getSelectedButton() !== ui.Button.OK) return;
@@ -1362,7 +1415,10 @@ function setAdminPin(){
 function getConfigMeta(){
   return {
     company:CONFIG.COMPANY_NAME, tagline:CONFIG.TAGLINE,
-    pinRequired: !!adminPin_(),
+    // pinRequired = "show the login gate" (Index.html opens the app straight away when false), so it
+    // must stay true while users exist even if the PIN is blank or PIN login is off.
+    pinRequired: !!adminPin_() || anyUsersConfigured_(),
+    pinLogin: pinLoginEnabled_(),
     usersConfigured: anyUsersConfigured_(),
     sources:CONFIG.SOURCES, team:getTeam(), priorities:CONFIG.PRIORITIES,
     stages:STAGES, timelines:TIMELINES, escalations:ESCALATIONS, gst:CONFIG.GST_PERCENT, quotePrefix:CONFIG.QUOTE_PREFIX,
@@ -1467,6 +1523,7 @@ function addUser(username, name, password, role, token){
   return {ok:true, msg:'User '+username+' added.'};
 }
 function addUserFromMenu(){
+  requireOwnerOrSheetUi_();
   const ui = SpreadsheetApp.getUi();
   const u = ui.prompt('Add User — step 1/4', 'Username (lowercase, no spaces):', ui.ButtonSet.OK_CANCEL);
   if (u.getSelectedButton()!==ui.Button.OK || !u.getResponseText().trim()) return;
@@ -1580,6 +1637,12 @@ function requestPasswordReset(username){
 }
 function checkPin(pin){
   const adminPin = adminPin_();
+  // Refuse whenever the PIN path is off — including a blank ADMIN_PIN, which used to fall through
+  // and hand out an admin session for any input even with user accounts configured.
+  if (!pinLoginEnabled_()){
+    Utilities.sleep(800);
+    return {ok:false, msg:'PIN login band hai — apne username se sign in karein.'};
+  }
   if (adminPin && String(pin)!==String(adminPin)){
     Utilities.sleep(800); // slow down brute-forcing a short numeric PIN
     return {ok:false};
@@ -1611,7 +1674,6 @@ function requireAuth_(token){
       const raw = cache.get(key);
       if (raw){
         cache.put(key, raw, AUTH_TTL_SECONDS_); // refresh sliding TTL
-        if (raw === '1') return {u:'admin', name:'Admin', role:'admin'}; // pre-login-system session, still mid-flight
         try { return JSON.parse(raw); } catch(e){ return {u:'admin', name:'Admin', role:'admin'}; }
       }
       Utilities.sleep(150);
@@ -2412,6 +2474,7 @@ function moveStage(p, token){
     requireOwnLeadOrAdmin_(me, data[i0][map['LeadBy']]);
     const row = data[i0].slice();
     const stage = p.stage;
+    if (STAGES.indexOf(stage) < 0) return {ok:false, msg:'Invalid stage'};
     const set = function(col,val){ if(map[col]!==undefined) row[map[col]] = val; };
     set('Stage', stage); set('LastContact', todayStr_());
     if (stage==='Quoted'){
@@ -3110,12 +3173,14 @@ function debugStateSample_(list){
 
 /* ----------------------------------------------------------- DAILY DIGEST */
 function setupDailyTrigger(){
+  requireOwnerOrSheetUi_();
   ScriptApp.getProjectTriggers().forEach(function(t){ if(t.getHandlerFunction()==='sendDailyDigest') ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('sendDailyDigest').timeBased().everyDays(1).atHour(CONFIG.DIGEST_HOUR).create();
   SpreadsheetApp.getActive().toast('Daily follow-up email set for ~'+CONFIG.DIGEST_HOUR+':00','Sales FMS',6);
 }
 function escHtml_(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
-function sendDailyDigest(){
+function sendDailyDigest(e){
+  if (!isProjectTrigger_(e)) requireOwnerOrSheetUi_();
   const to=CONFIG.ADMIN_EMAIL||Session.getActiveUser().getEmail(); if(!to) return;
   const due=getFollowUpsDue(INTERNAL_BYPASS_); const dash=getDashboard(undefined, INTERNAL_BYPASS_); const url=ScriptApp.getService().getUrl();
   const row=function(e,tag){ return '<tr><td style="padding:6px 10px;border-bottom:1px solid #eee"><b>'+escHtml_(e.Customer)+'</b>'+(e.Company?(' — '+escHtml_(e.Company)):'')+

@@ -1,7 +1,7 @@
 <script>
 function rupee(n){ n=Number(n)||0; return '₹'+n.toLocaleString('en-IN'); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
-function badge(st){ return '<span class="badge b-'+String(st).replace('-','')+'">'+st+'</span>'; }
+function badge(st){ return '<span class="badge b-'+esc(String(st).replace('-',''))+'">'+esc(st)+'</span>'; }
 function toast(m){ var t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(function(){t.remove();},3200); }
 function val(id){ var el=document.getElementById(id); return el?el.value:''; }
 function setv(id,v){ var el=document.getElementById(id); if(el) el.value=v||''; }

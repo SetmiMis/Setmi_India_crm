@@ -99,6 +99,7 @@ function resolveDistrictGeo_(neededKeys, budgetOverride){
 // of relying on the small per-load budget in getMapAnalyticsFull to slowly warm the cache over many
 // tab opens. Safe to re-run any time — already-cached pairs (hit or genuine miss) cost nothing.
 function warmDistrictGeoFromMenu(){
+  requireOwnerOrSheetUi_();
   const list = getAllEnquiries_();
   const needed = {};
   list.forEach(function(e){

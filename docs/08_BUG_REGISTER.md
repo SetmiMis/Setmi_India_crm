@@ -21,7 +21,7 @@
 
 | ID | Module | Severity | Status | Title |
 |---|---|---|---|---|
-| BUG-001 | Security / all | Critical | Confirmed-code | Anonymous callers can run data-modifying maintenance functions (= SEC-01) |
+| BUG-001 | Security / all | Critical | Fixed in code, not deployed | Anonymous callers can run data-modifying maintenance functions (= SEC-01) |
 | BUG-002 | Archive | High | Confirmed-live (latent) | Archive column order and width differ from Enquiries; archive/restore copy by position |
 | BUG-003 | Call Log / Follow-ups | High | Confirmed-live | 34 duplicate CallLogIDs, 2 duplicate FollowUpIDs |
 | BUG-004 | Enquiry edit / stage | High | Confirmed-code | Lost-update race: unlocked full-row rewrites |
@@ -29,7 +29,7 @@
 | BUG-006 | Intake → Pending | Medium | Confirmed-live | Pending sheet lacks Qty/Timeline, so intake values are dropped and Grade is never set |
 | BUG-007 | Meta import | Medium | Confirmed-code | Dedup ignores Archive; imported leads skip Customers; two importers behave differently |
 | BUG-008 | Meta import trigger | Medium | Suspected | 30-min trigger targets the private function `importNewMetaLeads_` |
-| BUG-009 | Stage move | Medium | Confirmed-code | `moveStage` accepts any stage value and any transition |
+| BUG-009 | Stage move | Medium | Fixed in code (stage value), not deployed; transitions still unrestricted | `moveStage` accepts any stage value and any transition |
 | BUG-010 | Transfer | Low | Needs decision | `editEnquiry` lets an owner reassign LeadBy directly, bypassing acceptance |
 | BUG-011 | Pending Approvals | Low | Needs decision | Any rep can approve/reject (no admin check) |
 | BUG-012 | Enquiries data | Low | Confirmed-live | 7 blank rows inside the Enquiries table |
@@ -170,6 +170,9 @@ described in 05.
 | R19 | Meta import | new rows imported once; re-run imports 0 |
 | R20 | Digest | `sendDailyDigest` email content (staging recipient) |
 | R21 | Users admin | add/deactivate/reset/role; self-demote blocked |
+| R22 | Maintenance guard (SEC-01) | from the web app console, `google.script.run.recalculateAllNextFollowUps()` fails with "only available from the spreadsheet menu" (signed out, and signed in as a non-owner); the same item works from the Sales FMS menu; the daily digest trigger still sends |
+| R23 | PIN policy (SEC-02) | with users present: PIN link hidden, correct PIN refused; with `ALLOW_PIN_LOGIN=YES`: PIN works; existing sessions were signed out once |
+| R24 | Share key (SEC-04) | `?page=analysis&key=<property value>` loads; old or wrong key → "This link is not valid." |
 
 ## Bug report template
 

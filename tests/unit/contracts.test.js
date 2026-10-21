@@ -91,6 +91,50 @@ test('menu items and trigger handlers point at existing functions', () => {
   assert.deepEqual(missing, []);
 });
 
+// SEC-01 guard. Every top-level function without a trailing `_` is callable anonymously through
+// google.script.run, so each one must authenticate (requireAuth_), be restricted to the
+// spreadsheet menu / owner (requireOwnerOrSheetUi_), check a share/metrics key, or be listed here
+// on purpose. Adding a name to this list is a security decision — say why in the PR.
+const ANONYMOUS_BY_DESIGN = {
+  doGet: 'web app entry point',
+  include: 'template helper; returns bundled client HTML only',
+  onOpen: 'builds the spreadsheet menu; getUi() throws in web context',
+  calculateFollowupStatus: 'pure date helper, no data access',
+  getConfigMeta: 'login page needs enums, team list, gate flags',
+  getTeam: 'Lead By dropdown on the public field form',
+  getEnquiryLink: 'returns the public field-form URL',
+  checkPhoneDuplicate: 'public field form repeat warning (aggregate only; see SEC-07)',
+  submitFieldEnquiry: 'public field form; lands in Pending Approvals',
+  login: 'issues a session',
+  checkPin: 'issues a session (disabled once users exist, SEC-02)',
+  requestPasswordReset: 'login page "Forgot password?"'
+};
+// Public wrappers whose auth lives in the helper they delegate to.
+const DELEGATED_AUTH = { omsMarkPiSent: 'omsOrderAction_', omsRecordPayment: 'omsOrderAction_' };
+
+function bodyOf(fn) {
+  const m = new RegExp(`^function\\s+${fn}\\s*\\([^)]*\\)\\s*\\{`, 'm').exec(server);
+  let i = m.index + m[0].length, depth = 1;
+  while (depth && i < server.length) { const c = server[i++]; if (c === '{') depth++; else if (c === '}') depth--; }
+  return server.slice(m.index, i);
+}
+
+test('SEC-01: every public server function authenticates, is guarded, or is anonymous by design', () => {
+  const unguarded = [];
+  for (const fn of declared) {
+    if (!isPublic(fn) || ANONYMOUS_BY_DESIGN[fn]) continue;
+    const body = bodyOf(fn);
+    if (DELEGATED_AUTH[fn]) {
+      assert.ok(body.includes(DELEGATED_AUTH[fn] + '('), `${fn} must delegate to ${DELEGATED_AUTH[fn]}`);
+      assert.ok(bodyOf(DELEGATED_AUTH[fn]).includes('requireAuth_('), `${DELEGATED_AUTH[fn]} must authenticate`);
+      continue;
+    }
+    if (/requireAuth_\(|requireOwnerOrSheetUi_\(|analysisKeyOk_\(/.test(body)) continue;
+    unguarded.push(fn);
+  }
+  assert.deepEqual(unguarded, []);
+});
+
 test('manifest keeps the documented web app settings', () => {
   const manifest = JSON.parse(read('appsscript.json'));
   assert.equal(manifest.timeZone, 'Asia/Kolkata');

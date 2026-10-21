@@ -30,7 +30,7 @@
       </div>
       <div id="loginErr" class="sub" style="color:var(--red);margin-top:8px"></div>
       <button class="btn" onclick="tryLogin()" style="width:100%;margin-top:12px">Sign in</button>
-      <div class="sub" style="margin-top:10px"><a href="#" onclick="showPinGate();return false;">Use the shared admin PIN instead</a></div>
+      <div id="pinLink" class="sub" style="margin-top:10px"><a href="#" onclick="showPinGate();return false;">Use the shared admin PIN instead</a></div>
       <div class="sub" style="margin-top:6px"><a href="#" onclick="showForgotGate();return false;">Forgot password?</a></div>
     </div>
     <div id="pinBlock" class="hidden">
@@ -554,6 +554,7 @@ google.script.run.withSuccessHandler(function(m){
     // Re-running it here once META is actually populated fixes that regardless of which call wins.
     if (typeof fillSelects === 'function') fillSelects();
 
+    if (!m.pinLogin){ var pl = document.getElementById('pinLink'); if (pl) pl.style.display = 'none'; }
     if(!m.pinRequired) openApp();
 }).getConfigMeta();
 </script>

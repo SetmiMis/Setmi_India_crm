@@ -15,6 +15,7 @@ function metaLeadsSheetId_(){
   return PropertiesService.getScriptProperties().getProperty(META_LEADS_SHEET_ID_PROP_) || '';
 }
 function setMetaLeadsSheetId(){
+  requireOwnerOrSheetUi_();
   const ui = SpreadsheetApp.getUi();
   const res = ui.prompt('Set Meta Ads Leads Sheet',
     'Paste the Google Sheet ID (or full URL) of the external Leads sheet that Meta Ads exports land in:',
@@ -195,6 +196,7 @@ function importMetaLeadsNow(token){
   return importNewMetaLeads_();
 }
 function importMetaLeadsFromMenu(){
+  requireOwnerOrSheetUi_();
   const r = importNewMetaLeads_();
   SpreadsheetApp.getUi().alert('Import Meta Ads Leads', r.msg, SpreadsheetApp.getUi().ButtonSet.OK);
 }
@@ -202,11 +204,13 @@ function importMetaLeadsFromMenu(){
 /** Runs importNewMetaLeads_() every 30 min — the "just happens automatically" behavior, matching
     the Vercel app's Cron job, without needing an external scheduler. */
 function setupMetaLeadsImportTrigger(){
+  requireOwnerOrSheetUi_();
   ScriptApp.getProjectTriggers().forEach(function(t){ if (t.getHandlerFunction()==='importNewMetaLeads_') ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('importNewMetaLeads_').timeBased().everyMinutes(30).create();
   SpreadsheetApp.getActive().toast('Meta Ads leads will now auto-import every 30 minutes.','Sales FMS',6);
 }
 function stopMetaLeadsImportTrigger(){
+  requireOwnerOrSheetUi_();
   let removed = 0;
   ScriptApp.getProjectTriggers().forEach(function(t){ if (t.getHandlerFunction()==='importNewMetaLeads_'){ ScriptApp.deleteTrigger(t); removed++; } });
   SpreadsheetApp.getActive().toast(removed ? 'Auto-import stopped.' : 'Auto-import was not running.','Sales FMS',5);

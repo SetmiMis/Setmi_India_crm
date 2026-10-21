@@ -41,8 +41,15 @@ deployment version numbers were not visible without the editor's Manage deployme
 | `OMS_URL`, `OMS_INGEST_TOKEN` | OMS bridge | Project Settings → Script properties (by hand) |
 | `cityStateCache_v1`, `districtGeoCache_v1` | geocoding caches (JSON) | automatic. Script Properties have a 9 KB-per-value / 500 KB-total quota, so these caches can hit it [H] |
 
-**In source, not in properties:** `ANALYSIS_SHARE_KEY_` (`Analysis.js`). It is redacted in git; see
-`src/REDACTIONS.md`.
+**After the SEC-01/02/04 change (not yet deployed):**
+
+| Property | Used by | Set via |
+|---|---|---|
+| `ANALYSIS_SHARE_KEY` | `?page=analysis&key=` share link (replaces the source literal `ANALYSIS_SHARE_KEY_`) | menu → Set Analysis Share Link Key. **Must be set before deploying**, or existing share links stop working |
+| `ALLOW_PIN_LOGIN` | `checkPin` | Project Settings, by hand. `YES` keeps the shared PIN working after users exist; anything else disables it |
+
+`ADMIN_PIN` is no longer seeded by `setupSheets`. Menu tools, setters and trigger setup functions
+now run only from the spreadsheet menu or as the owner.
 
 ## Triggers (from code; installed state not verified)
 
