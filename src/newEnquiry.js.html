@@ -1,0 +1,154 @@
+<script>
+/* NEW ENQUIRY */
+var MAX_DOC_BYTES = 10 * 1024 * 1024; // 10 MB, mirrors MAX_DOC_SIZE_BYTES in Code.js
+var N_DOC = null; // {base64, mime, name} — set once a PDF is picked, cleared after save/reset
+
+function handleNDocSelect(input){
+  var file = input.files && input.files[0];
+  var preview = document.getElementById('nDocPreview');
+  function clear(){ N_DOC = null; if (preview) preview.innerHTML=''; updateNSaveHint(); }
+  if (!file){ clear(); return; }
+
+  if (file.type !== 'application/pdf'){
+    toast('Only PDF files are accepted');
+    input.value = ''; clear();
+    return;
+  }
+  if (file.size > MAX_DOC_BYTES){
+    toast('PDF is too large — max 10 MB');
+    input.value = ''; clear();
+    return;
+  }
+
+  var reader = new FileReader();
+  reader.onload = function(e){
+    N_DOC = { base64: e.target.result.split(',')[1], mime: 'application/pdf', name: file.name || 'enquiry-document.pdf' };
+    if (preview) preview.innerHTML = '📄 '+esc(file.name)+' ('+Math.round(file.size/1024)+' KB)';
+    updateNSaveHint();
+  };
+  reader.readAsDataURL(file);
+}
+
+function updateNSaveHint(){
+  var hint = document.getElementById('nSaveHint');
+  if (!hint) return;
+  hint.textContent = N_DOC
+    ? 'Document attached — this will go to Pending Approvals for review.'
+    : 'Goes to Pending Approvals for review before it joins the pipeline.';
+}
+
+/* VALIDATION + DUPLICATE CHECK */
+var N_VALIDATE_IDS = ['nCust','nPhone','nEmail','nGST','nPincode'];
+
+function validateNField(id){
+  var v = val(id);
+  var ok = true, msg = '';
+  if (id === 'nCust'){ ok = !!v.trim(); msg = ok ? '' : 'Customer name is required'; }
+  else if (id === 'nPhone'){
+    if (!v.trim()){ ok = false; msg = 'Phone is required'; }
+    else { ok = isValidPhone(v); msg = ok ? '' : 'Enter a valid 10-digit phone number'; }
+  }
+  else if (id === 'nEmail'){ ok = isValidEmail(v); msg = ok ? '' : 'Enter a valid email address'; }
+  else if (id === 'nGST'){ ok = isValidGST(v); msg = ok ? '' : 'Enter a valid 15-character GSTIN'; }
+  else if (id === 'nPincode'){ ok = isValidPincode(v); msg = ok ? '' : 'Enter a valid 6-digit pincode'; }
+  setFieldError(id, msg);
+  return ok;
+}
+function validateNewEnquiryForm(){
+  var allOk = true;
+  N_VALIDATE_IDS.forEach(function(id){ if (!validateNField(id)) allOk = false; });
+  return allOk;
+}
+
+function onNPhoneBlur(){
+  validateNField('nPhone');
+  var phone = val('nPhone').trim();
+  var warnEl = document.getElementById('nDupWarning');
+  if (!isValidPhone(phone)){ if (warnEl) warnEl.classList.add('hidden'); return; }
+
+  google.script.run.withSuccessHandler(function(r){
+    if (!warnEl) return;
+    if (r.found){
+      warnEl.textContent = '⚠ This number already has '+r.count+' enquiry(ies) with us — last on '+(r.lastDate||'—')+' ('+(r.lastStage||'—')+'). You can still save a new one for a fresh requirement.';
+      warnEl.classList.remove('hidden');
+    } else {
+      warnEl.classList.add('hidden');
+    }
+  }).checkPhoneDuplicate(phone);
+
+  // Auto-fill from a known customer record — only fills fields the rep hasn't already typed into.
+  google.script.run.withSuccessHandler(function(c){
+    if (!c.found) return;
+    var filled = false;
+    if (!val('nComp').trim() && c.company){ setv('nComp', c.company); filled = true; }
+    if (!val('nEmail').trim() && c.email){ setv('nEmail', c.email); filled = true; }
+    if (!val('nGST').trim() && c.gst){ setv('nGST', c.gst); filled = true; }
+    if (!val('nPincode').trim() && c.pincode){
+      setv('nPincode', c.pincode); setv('nDistrict', c.district); setv('nState', c.state);
+      fetchPincodeMain();
+      filled = true;
+    }
+    if (filled) toast('Known customer found — details auto-filled');
+  }).getCustomerByPhone(phone, AUTH_TOKEN);
+}
+
+function saveEnq(){
+  if (!validateNewEnquiryForm()){ toast('Please fix the highlighted fields'); return; }
+  var cust=val('nCust').trim(), phone=val('nPhone').trim();
+  var btn=document.getElementById('nSave'); btn.disabled=true; btn.innerHTML='<span class="spin"></span> Saving';
+
+  var p = {
+      customer: val("nCust"),
+      company: val("nComp"),
+      phone: val("nPhone"),
+      email: val("nEmail"),
+
+      gst: val("nGST"),
+      pincode: val("nPincode"),
+      district: val("nDistrict"),
+      state: val("nState"),
+      city: val("nCity"),
+
+      source: val("nSource"),
+      priority: val("nPri"),
+      leadBy: val("nLead"),
+      nextFollowUp: val("nNext"),
+      requirement: val("nReq"),
+      qty: val("nQty"), timeline: val("nTimeline"),
+      notes: val("nNotes")
+  };
+
+  function resetForm(msg, waWelcome){
+    btn.disabled=false; btn.innerHTML='Save Enquiry';
+    toast(msg);
+    ['nCust','nComp','nPhone','nEmail','nGST','nPincode','nDistrict','nState','nCity','nReq','nQty','nTimeline','nNotes','nNext'].forEach(function(id){setv(id,'');});
+    clearFieldErrors(N_VALIDATE_IDS);
+    var dupEl = document.getElementById('nDupWarning'); if (dupEl) dupEl.classList.add('hidden');
+    setv('nDoc',''); N_DOC = null;
+    var preview = document.getElementById('nDocPreview'); if (preview) preview.innerHTML='';
+    updateNSaveHint();
+    if (waWelcome){ var w=window.open('','_blank'); if (w) w.location.href=waWelcome; }
+    refreshAll();
+  }
+  function fail(r){ btn.disabled=false; btn.innerHTML='Save Enquiry'; toast(r.msg||r.message||'Save failed'); }
+
+  if (N_DOC){
+    p.docBase64 = N_DOC.base64; p.docMime = N_DOC.mime; p.docName = N_DOC.name;
+  }
+  // Every New Enquiry submission — with or without an attached document — goes to Pending Approvals
+  // for review; nothing is written straight into the pipeline from this form anymore.
+  google.script.run.withSuccessHandler(function(r){ if (r.ok) resetForm(r.msg); else fail(r); }).withFailureHandler(function(err){ if (handleAuthError(err)) return; fail(err); }).submitPendingEnquiry(p, AUTH_TOKEN);
+}
+
+function copyEnqLink(){
+  google.script.run.withSuccessHandler(function(url){
+    var ta=document.createElement('textarea'); ta.value=url; document.body.appendChild(ta); ta.select();
+    try{document.execCommand('copy');}catch(e){} ta.remove(); toast('Field enquiry link copied');
+  }).getEnquiryLink();
+}
+
+/* AUTO FETCH PINCODE FOR CRM */
+function fetchPincodeMain(){
+  fetchPincodeInto('nPincode', 'nDistrict', 'nState', 'nCity');
+}
+</script>

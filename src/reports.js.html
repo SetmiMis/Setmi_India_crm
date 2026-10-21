@@ -1,0 +1,64 @@
+<script>
+
+  /* REPORTS */
+var REP_SOURCE_TABLE = null, REP_LEAD_TABLE = null;
+
+function getRepSourceTable_() {
+  if (REP_SOURCE_TABLE) return REP_SOURCE_TABLE;
+  REP_SOURCE_TABLE = new DataTable({
+    id: 'repSource',
+    searchable: false,
+    pageSizeOptions: [25, 50, 100],
+    emptyText: 'No source data',
+    defaultSort: { key: 'enquiries', dir: 'desc' },
+    rowKey: function(o) { return o.source; },
+    columns: [
+      { key: 'source', label: 'Source', render: function(o) { return '<b>'+esc(o.source)+'</b>'; } },
+      { key: 'enquiries', label: 'Enq' },
+      { key: 'won', label: 'Won' },
+      { key: 'lost', label: 'Lost' },
+      { key: 'winRate', label: 'Win%', render: function(o) { return o.winRate+'%'; } }
+    ]
+  }).mount();
+  return REP_SOURCE_TABLE;
+}
+
+function getRepLeadTable_() {
+  if (REP_LEAD_TABLE) return REP_LEAD_TABLE;
+  REP_LEAD_TABLE = new DataTable({
+    id: 'repLead',
+    searchable: false,
+    pageSizeOptions: [25, 50, 100],
+    emptyText: 'No lead-by data',
+    defaultSort: { key: 'enquiries', dir: 'desc' },
+    rowKey: function(o) { return o.leadBy; },
+    columns: [
+      { key: 'leadBy', label: 'Lead By', render: function(o) { return '<b>'+esc(o.leadBy)+'</b>'; } },
+      { key: 'enquiries', label: 'Enq' },
+      { key: 'won', label: 'Won' }
+    ]
+  }).mount();
+  return REP_LEAD_TABLE;
+}
+
+function loadReports(){
+  google.script.run.withSuccessHandler(function(d){
+    getRepSourceTable_().setRows(d.sources);
+    getRepLeadTable_().setRows(d.leads);
+  }).withFailureHandler(function(err){ handleAuthError(err, 'Error loading reports'); }).getReports(AUTH_TOKEN);
+}
+function exportReport(){
+  var btn = document.getElementById('repExportBtn');
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Exporting…';
+  function done(){ btn.disabled = false; btn.innerHTML = '⬇ Export snapshot to a sheet'; }
+  google.script.run.withSuccessHandler(function(r){
+    done();
+    toast('Saved tab: '+r.name);
+  }).withFailureHandler(function(err){
+    done();
+    if (handleAuthError(err)) return;
+    toast('Export failed: ' + (err && err.message || err));
+  }).generateReportSheet(AUTH_TOKEN);
+}
+
+</script>

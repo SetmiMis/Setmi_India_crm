@@ -1,0 +1,279 @@
+<script>
+/* =====================================================
+   MAP ANALYTICS — summary cards, zone/state charts, breakdown tables,
+   and an interactive Map View: click a state to highlight it and drill into
+   its districts/areas in the table below. GeoChart has no free-form pan/zoom,
+   and — this matters — it also doesn't support zooming its own viewport into
+   an individual Indian state (region:'IN-DL' etc. errors as "Requested map
+   does not exist", since Google's geo data for India only reliably covers
+   the whole-country provinces view). So the map always stays on all-India;
+   "selecting" a state just highlights it there while the real drill-down
+   happens in the State -> District -> Area/City table.
+===================================================== */
+
+// Was two separate google.script.run calls (getMapAnalytics + getMapDrilldown), each re-scanning
+// the full enquiry list server-side and shipping its own JSON payload — with 2000+ enquiries that
+// doubled both the scan time and the network transfer on every tab open. Merged server-side into
+// getMapAnalyticsFull() (same cached data, one scan, one payload) — this is what was making the
+// tab feel slow/stuck, not a data bug.
+function loadMapAnalytics(){
+  google.script.run.withSuccessHandler(function(d){
+    MAP_ANALYTICS_DATA = d;
+    renderMapSummary_(d.summary);
+    renderMapCharts_(d);
+    renderMapMetricTable_();
+
+    var dd = d.drilldown;
+    MAP_DRILLDOWN_DATA = dd;
+    MAP_DRILL_STATE = null; MAP_DRILL_DISTRICT = null;
+    var clearBtn = document.getElementById('mapZoomOutBtn');
+    if (clearBtn) clearBtn.classList.add('hidden');
+    if (MAP_VIEW_READY) renderMapViewChart_(dd); else MAP_VIEW_PENDING_DATA = dd;
+    renderDrillTable_();
+  }).withFailureHandler(function(err){ console.error(err); handleAuthError(err, 'MAP Analytics load error'); }).getMapAnalyticsFull(AUTH_TOKEN);
+}
+
+/* MAP VIEW — real OpenStreetMap tiles via Leaflet (matches the Vercel app's look). Previously used
+   Google's GeoChart, which only draws flat solid-color state shapes with no terrain/tiles. Points
+   plot at the real pincode centroid when the enquiry has a known 6-digit Pincode (same idea as the
+   Vercel app's per-pincode dots); rows with no usable pincode fall back to their State centroid and
+   are grouped/marked "approx". Capped to 300 points server-side. Clicking any dot drills that dot's
+   state into the table below. */
+var MAP_VIEW_READY = true; // no async chart-package load needed for Leaflet
+var MAP_VIEW_PENDING_DATA = null;
+var mapViewMap_ = null;
+var mapViewMarkers_ = []; // L.CircleMarker[]
+var mapViewPoints_ = [];
+var mapViewSelectedName_ = null;
+
+function markerColorFor_(p){
+  if (p.won >= p.lost && p.won > 0) return '#3fa96a';
+  if (p.lost > p.won) return '#c0473a';
+  return '#3f7cc0';
+}
+// Smaller/less-overlapping dots than before — with 300 points close together (many enquiries share
+// a city), the old sizing (up to 27px radius) turned dense areas into one solid blob with no gaps.
+function markerRadiusFor_(total, max){
+  return 3 + Math.sqrt(total / (max||1)) * 13;
+}
+
+function renderMapViewChart_(payload){
+  mapViewPoints_ = (payload.points||[]).filter(function(p){ return p.lat!=null && p.lng!=null; });
+  mapViewSelectedName_ = null;
+  drawMapChart_();
+}
+
+function drawMapChart_(){
+  var el = document.getElementById('mapViewChart');
+  if (!el || !mapViewPoints_.length) return;
+
+  if (!mapViewMap_){
+    mapViewMap_ = L.map(el, { scrollWheelZoom: true }).setView([22.8, 80], 5);
+    // Plain OSM tiles — tried CARTO Voyager for a richer/Google-Maps-like look, but CARTO's
+    // basemaps.cartocdn.com now requires an API key (their free-tier policy changed), so it just
+    // showed "API KEY REQUIRED" watermarked tiles. Reverted to OSM, which needs no key.
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
+    }).addTo(mapViewMap_);
+  }
+
+  mapViewMarkers_.forEach(function(m){ mapViewMap_.removeLayer(m); });
+  mapViewMarkers_ = [];
+
+  var max = Math.max.apply(null, mapViewPoints_.map(function(p){ return p.total; })) || 1;
+  mapViewPoints_.forEach(function(p){
+    var isSelected = mapViewSelectedName_ === p.state;
+    var marker = L.circleMarker([p.lat, p.lng], {
+      radius: markerRadiusFor_(p.total, max),
+      color: isSelected ? '#e0962a' : markerColorFor_(p),
+      fillColor: isSelected ? '#e0962a' : markerColorFor_(p),
+      fillOpacity: 0.45, weight: isSelected ? 3 : 1
+    }).addTo(mapViewMap_);
+    var label = !p.approx ? (esc(p.state)+' — '+esc(p.pincode))
+      : p.district ? (esc(p.district)+', '+esc(p.state)+' (approx.)')
+      : (esc(p.state)+' (approx.)');
+    marker.bindPopup('<b>'+label+'</b><br>'+p.total+' enquiries · '+p.won+' won · '+p.lost+' lost');
+    marker.on('click', function(){ selectMapStateByName_(p.state); });
+    mapViewMarkers_.push(marker);
+  });
+}
+
+function selectMapStateByName_(name){
+  MAP_DRILL_STATE = name; MAP_DRILL_DISTRICT = null;
+  renderDrillTable_();
+  highlightMapState_(name);
+}
+
+function highlightMapState_(name){
+  var btn = document.getElementById('mapZoomOutBtn');
+  if (btn) btn.classList.remove('hidden');
+  mapViewSelectedName_ = name;
+  drawMapChart_();
+}
+function clearMapSelection_(){
+  var btn = document.getElementById('mapZoomOutBtn');
+  if (btn) btn.classList.add('hidden');
+  mapViewSelectedName_ = null;
+  drawMapChart_();
+}
+
+/* STATE -> DISTRICT -> AREA DRILL-DOWN TABLE, kept in sync with the map above */
+var MAP_DRILLDOWN_DATA = null;
+var MAP_DRILL_STATE = null;
+var MAP_DRILL_DISTRICT = null;
+var MAP_CURRENT_DISTRICT_ROWS = [];
+
+function renderDrillTable_(){
+  var el = document.getElementById('mapDrillTable');
+  var crumbEl = document.getElementById('mapDrillCrumb');
+  if (!el || !MAP_DRILLDOWN_DATA) return;
+
+  if (!MAP_DRILL_STATE){
+    if (crumbEl) crumbEl.textContent = 'All States — click a row (or the map) to drill into districts';
+    el.innerHTML = renderStateRows_(MAP_DRILLDOWN_DATA.states);
+  } else if (!MAP_DRILL_DISTRICT){
+    MAP_CURRENT_DISTRICT_ROWS = MAP_DRILLDOWN_DATA.districtsByState[MAP_DRILL_STATE] || [];
+    if (crumbEl) crumbEl.innerHTML = '<a href="#" onclick="drillUpToStates_();return false;">All States</a> › '+esc(MAP_DRILL_STATE);
+    el.innerHTML = renderDistrictRows_(MAP_CURRENT_DISTRICT_ROWS);
+  } else {
+    var key = MAP_DRILL_STATE+'||'+MAP_DRILL_DISTRICT;
+    if (crumbEl) crumbEl.innerHTML = '<a href="#" onclick="drillUpToStates_();return false;">All States</a> › '+
+      '<a href="#" onclick="drillUpToDistricts_();return false;">'+esc(MAP_DRILL_STATE)+'</a> › '+esc(MAP_DRILL_DISTRICT);
+    el.innerHTML = renderAreaRows_((MAP_DRILLDOWN_DATA.areasByDistrict[key]) || []);
+  }
+}
+
+function renderStateRows_(rows){
+  if (!rows.length) return '<div class="empty">No data yet</div>';
+  return '<table><thead><tr><th>State</th><th>Total</th><th>Won</th><th>Lost</th></tr></thead><tbody>'+
+    rows.map(function(r,i){
+      return '<tr><td><a href="#" onclick="selectMapState_('+i+');return false;"><b>'+esc(r.name)+'</b></a></td>'+
+        '<td>'+r.total+'</td><td style="color:var(--green);font-weight:700">'+r.won+'</td><td style="color:var(--red);font-weight:700">'+r.lost+'</td></tr>';
+    }).join('')+
+    '</tbody></table>';
+}
+function renderDistrictRows_(rows){
+  if (!rows.length) return '<div class="empty">No district data for this state</div>';
+  return '<table><thead><tr><th>District</th><th>Total</th><th>Won</th><th>Lost</th></tr></thead><tbody>'+
+    rows.map(function(r,i){
+      return '<tr><td><a href="#" onclick="selectMapDistrict_('+i+');return false;"><b>'+esc(r.name)+'</b></a></td>'+
+        '<td>'+r.total+'</td><td style="color:var(--green);font-weight:700">'+r.won+'</td><td style="color:var(--red);font-weight:700">'+r.lost+'</td></tr>';
+    }).join('')+
+    '</tbody></table>';
+}
+function renderAreaRows_(rows){
+  if (!rows.length) return '<div class="empty">No area/city data for this district</div>';
+  return '<table><thead><tr><th>Area / City</th><th>Total</th><th>Won</th><th>Lost</th></tr></thead><tbody>'+
+    rows.map(function(r){
+      return '<tr><td><b>'+esc(r.name)+'</b></td><td>'+r.total+'</td>'+
+        '<td style="color:var(--green);font-weight:700">'+r.won+'</td><td style="color:var(--red);font-weight:700">'+r.lost+'</td></tr>';
+    }).join('')+
+    '</tbody></table>';
+}
+
+function selectMapState_(idx){
+  var s = MAP_DRILLDOWN_DATA.states[idx];
+  if (!s) return;
+  MAP_DRILL_STATE = s.name; MAP_DRILL_DISTRICT = null;
+  renderDrillTable_();
+  if (s.lat!=null && s.lng!=null) highlightMapState_(s.name); else clearMapSelection_();
+}
+function selectMapDistrict_(idx){
+  var d = MAP_CURRENT_DISTRICT_ROWS[idx];
+  if (!d) return;
+  MAP_DRILL_DISTRICT = d.name;
+  renderDrillTable_();
+}
+function drillUpToStates_(){
+  MAP_DRILL_STATE = null; MAP_DRILL_DISTRICT = null;
+  renderDrillTable_();
+  clearMapSelection_();
+}
+function drillUpToDistricts_(){
+  MAP_DRILL_DISTRICT = null;
+  renderDrillTable_();
+}
+
+function renderMapSummary_(s){
+  var el = document.getElementById('mapKpis');
+  if (!el) return;
+  var k = [
+    { l:'📥 Total Enquiries', v:s.totalEnquiries||0, c:'acc' },
+    { l:"📅 Today's Enquiries", v:s.todaysEnquiries||0, c:'today' },
+    { l:'🟢 Active Customers', v:s.activeCustomers||0, c:'good' },
+    { l:'🏆 Converted Customers', v:s.convertedCustomers||0, c:'purple' },
+    { l:'🔴 Lost Customers', v:s.lostCustomers||0, c:'alert' }
+  ];
+  el.innerHTML = k.map(function(x){
+    return '<div class="card kpi '+x.c+'"><div class="v">'+x.v+'</div><div class="l">'+x.l+'</div></div>';
+  }).join('');
+}
+
+function renderMapCharts_(d){
+  if (document.querySelector('#chartZonePie')){
+    document.querySelector('#chartZonePie').innerHTML = '';
+    new ApexCharts(document.querySelector('#chartZonePie'), {
+      chart: { type:'pie', height:260, fontFamily:'Plus Jakarta Sans' },
+      series: d.byZone.map(function(z){ return z.total; }),
+      labels: d.byZone.map(function(z){ return z.name; }),
+      colors: ['#0f9dc7','#54a737','#e0962a','#8b5cf6','#f43f5e','#3b82f6','#10b981'],
+      legend: { position:'bottom' }, dataLabels: { enabled:false }
+    }).render();
+  }
+  if (document.querySelector('#chartStateBar')){
+    document.querySelector('#chartStateBar').innerHTML = '';
+    var top = d.byState.slice(0,10);
+    new ApexCharts(document.querySelector('#chartStateBar'), {
+      chart: { type:'bar', height:300, toolbar:{show:false}, fontFamily:'Plus Jakarta Sans' },
+      series: [{ name:'Enquiries', data: top.map(function(s){ return s.total; }) }],
+      xaxis: { categories: top.map(function(s){ return s.name; }) },
+      colors: ['#0f9dc7'],
+      plotOptions: { bar: { borderRadius:4, horizontal:true } },
+      dataLabels: { enabled:true }
+    }).render();
+  }
+}
+
+function mapBreakdownTable_(list){
+  if (!list.length) return '<div class="empty">No data yet</div>';
+  var rows = list.map(function(o){
+    return '<tr><td><b>'+esc(o.name)+'</b></td><td>'+o.total+'</td>'+
+      '<td style="color:var(--green);font-weight:700">'+o.won+'</td>'+
+      '<td style="color:var(--red);font-weight:700">'+o.lost+'</td></tr>';
+  }).join('');
+  return '<table><thead><tr><th>Name</th><th>Total</th><th>Won</th><th>Lost</th></tr></thead><tbody>'+rows+'</tbody></table>';
+}
+function mapCountTable_(list, label){
+  if (!list.length) return '<div class="empty">No data yet</div>';
+  return '<table><thead><tr><th>Zone</th><th>'+label+'</th></tr></thead><tbody>'+
+    list.map(function(o){ return '<tr><td><b>'+esc(o.name)+'</b></td><td>'+o.count+'</td></tr>'; }).join('')+
+    '</tbody></table>';
+}
+
+/* Single dropdown picks which breakdown table shows, instead of stacking all 8 at once —
+   same pattern already used on the Follow-ups tab (one dropdown, one section at a time). */
+var MAP_ANALYTICS_DATA = null;
+var MAP_METRICS_ = {
+  topZones:     { title: '🏆 Top Performing Zones',     render: function(d){ return mapBreakdownTable_(d.topZones); } },
+  lowestZones:  { title: '📉 Lowest Performing Zones',  render: function(d){ return mapBreakdownTable_(d.lowestZones); } },
+  byState:      { title: 'By State',                    render: function(d){ return mapBreakdownTable_(d.byState); } },
+  byDistrict:   { title: 'By District',                 render: function(d){ return mapBreakdownTable_(d.byDistrict); } },
+  byZone:       { title: 'By Zone',                      render: function(d){ return mapBreakdownTable_(d.byZone); } },
+  bySource:     { title: 'By Source',                    render: function(d){ return mapBreakdownTable_(d.bySource); } },
+  zoneIn:       { title: 'Zone In (Converted)',          render: function(d){ return mapCountTable_(d.zoneIn, 'Converted'); } },
+  zoneOut:      { title: 'Zone Out (Lost)',              render: function(d){ return mapCountTable_(d.zoneOut, 'Lost'); } }
+};
+
+function renderMapMetricTable_(){
+  if (!MAP_ANALYTICS_DATA) return;
+  var sel = document.getElementById('mapMetricFilter');
+  var key = sel ? sel.value : 'topZones';
+  var metric = MAP_METRICS_[key] || MAP_METRICS_.topZones;
+
+  var titleEl = document.getElementById('mapMetricTitle');
+  if (titleEl) titleEl.textContent = metric.title;
+
+  var tableEl = document.getElementById('mapMetricTable');
+  if (tableEl) tableEl.innerHTML = metric.render(MAP_ANALYTICS_DATA);
+}
+</script>

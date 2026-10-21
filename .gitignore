@@ -1,0 +1,21 @@
+# clasp: local project binding + credentials (never commit)
+.clasp.json
+.clasprc.json
+**/.clasprc.json
+creds.json
+client_secret*.json
+*service-account*.json
+
+# exports / backups that may contain customer data
+*.csv
+*.xlsx
+*.xls
+backups/
+exports/
+
+# local tooling
+node_modules/
+.env
+.env.*
+.DS_Store
+*.log

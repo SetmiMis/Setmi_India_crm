@@ -1,0 +1,114 @@
+<script>
+/* CUSTOMERS */
+var CUST_TABLE = null;
+
+function getCustTable_() {
+  if (CUST_TABLE) return CUST_TABLE;
+  CUST_TABLE = new DataTable({
+    id: 'custTable',
+    searchPlaceholder: 'Search name / company / phone',
+    searchKeys: ['Name', 'Company', 'Phone', 'City'],
+    pageSize: 25,
+    emptyText: 'Koi customer nahi',
+    defaultSort: { key: 'Name', dir: 'asc' },
+    rowKey: function(c) { return c.CustID; },
+    columns: [
+      { key: 'Name', label: 'Customer', render: function(c) { return '<b>'+esc(c.Name)+'</b><div class="sub">'+esc(c.Company||'')+'</div>'; } },
+      { key: 'Phone', label: 'Phone / City', render: function(c) { return esc(c.Phone||'')+'<div class="sub">'+esc(c.City||'')+'</div>'; } },
+      { key: 'enquiries', label: 'Enq', render: function(c) { return String(c.enquiries||0); } },
+      { key: 'actions', label: 'Action', sortable: false, hideable: false, render: function(c) {
+          var idx = CUST_CACHE.indexOf(c);
+          return '<div class="actions"><button class="btn sm" onclick="openCustomer('+idx+')">Edit</button>'+
+            (c.Phone ? '<a class="btn green sm wa" target="_blank" href="'+waLink(c.Phone)+'">WA</a>' : '')+'</div>';
+        } }
+    ],
+    bulkActions: [
+      { label: 'Export Selected', icon: '⬇️', run: function(rows) { exportCustomerRows_(rows); } }
+    ]
+  }).mount();
+  return CUST_TABLE;
+}
+
+function loadCustomers(){
+  var container = document.getElementById('custTable');
+  if (container && !CUST_TABLE) container.innerHTML = '<div class="empty">Loading…</div>';
+  google.script.run.withSuccessHandler(function(list){
+    CUST_CACHE = list;
+    getCustTable_().setRows(list);
+  }).getCustomers({q:''}, AUTH_TOKEN);
+}
+
+function exportCustomerRows_(rows) {
+  if (!rows.length) { toast('No rows selected!'); return; }
+  var header = ['Name','Company','Phone','City','Email','GST','Pincode','District','State','Enquiries'];
+  var csvRow = function(vals){
+    return vals.map(function(v){ return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'; }).join(',');
+  };
+  var csv = [csvRow(header)];
+  rows.forEach(function(c){
+    csv.push(csvRow([c.Name, c.Company, c.Phone, c.City, c.Email, c.GST, c.Pincode, c.District, c.State, c.enquiries||0]));
+  });
+  var csvFile = new Blob([csv.join('\n')], {type: 'text/csv'});
+  var link = document.createElement('a');
+  link.download = 'Customers_Export_' + new Date().toISOString().slice(0,10) + '.csv';
+  link.href = window.URL.createObjectURL(csvFile);
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  toast('CSV Export downloaded! 📊 (' + rows.length + ' rows)');
+}
+function saveCustomer(){
+  var name=val('cName').trim(), phone=val('cPhone').trim();
+  if(!name||!phone){ toast('Name aur Phone zaroori'); return; }
+  var b=document.getElementById('cSave'); b.disabled=true; b.innerHTML='<span class="spin"></span>';
+  google.script.run.withSuccessHandler(function(r){
+    b.disabled=false; b.innerHTML='Save Customer';
+    toast(r.msg||'Saved');
+    if(r.ok){ ['cName','cComp','cPhone','cCity','cEmail','cGST','cPincode','cDistrict','cState'].forEach(function(id){setv(id,'');}); loadCustomers(); loadDash(); }
+  }).addCustomer({name:name,company:val('cComp'),phone:phone,city:val('cCity'),email:val('cEmail'),
+    gst:val('cGST'),pincode:val('cPincode'),district:val('cDistrict'),state:val('cState')}, AUTH_TOKEN);
+}
+function openCustomer(i){
+  var c=CUST_CACHE[i]; if(!c) return;
+  var html='<div style="display:flex;justify-content:space-between;align-items:start"><h3 class="sectitle">Edit Customer</h3><button class="btn ghost sm" onclick="closeModal()">✕</button></div>'+
+    '<label>Name</label><input id="eName" value="'+esc(c.Name)+'">'+
+    '<div class="grid2" style="margin-top:8px"><div><label>Company</label><input id="eComp" value="'+esc(c.Company||'')+'"></div>'+
+    '<div><label>Phone</label><input id="ePhone" value="'+esc(c.Phone||'')+'"></div></div>'+
+    '<div class="grid2" style="margin-top:8px"><div><label>City</label><input id="eCity" value="'+esc(c.City||'')+'"></div>'+
+    '<div><label>Email</label><input id="eEmail" value="'+esc(c.Email||'')+'"></div></div>'+
+    '<div class="grid2" style="margin-top:8px"><div><label>GST No.</label><input id="eGST" value="'+esc(c.GST||'')+'"></div>'+
+    '<div><label>Pincode</label><input id="ePincode" value="'+esc(c.Pincode||'')+'" maxlength="6" inputmode="numeric"></div></div>'+
+    '<div class="grid2" style="margin-top:8px"><div><label>District</label><input id="eDistrict" value="'+esc(c.District||'')+'"></div>'+
+    '<div><label>State</label><input id="eState" value="'+esc(c.State||'')+'"></div></div>'+
+    '<div class="sub" style="margin-top:8px">Editing here also updates this customer across all their enquiries & follow-ups.</div>'+
+    '<div style="margin-top:12px"><button class="btn green sm" onclick="commitCustomer(\''+c.CustID+'\')">Save changes</button></div>';
+  document.getElementById('modalBody').innerHTML=html;
+  document.getElementById('modalBg').classList.remove('hidden');
+}
+function commitCustomer(id){
+  google.script.run.withSuccessHandler(function(r){
+    toast(r.msg||'Updated'); closeModal(); loadCustomers(); refreshAll();
+  }).editCustomer({id:id,name:val('eName'),company:val('eComp'),phone:val('ePhone'),city:val('eCity'),email:val('eEmail'),
+    gst:val('eGST'),pincode:val('ePincode'),district:val('eDistrict'),state:val('eState')}, AUTH_TOKEN);
+}
+/* TEAM (Lead By) */
+function loadTeam(){
+  var team=META.team||[];
+  document.getElementById('teamChips').innerHTML=team.map(function(n){
+    return '<span class="teamchip">'+esc(n)+'<button title="Remove" onclick="rmLead(\''+esc(n)+'\')">✕</button></span>';
+  }).join('');
+}
+function addLead(){
+  var n=val('newLead').trim(); if(!n){ toast('Naam likho'); return; }
+  google.script.run.withSuccessHandler(function(r){
+    if(r.ok){ if(META.team.indexOf(n)<0) META.team.push(n); setv('newLead',''); fillSelects(); loadTeam(); toast(r.msg); }
+    else toast(r.msg);
+  }).addTeamMember(n, AUTH_TOKEN);
+}
+function rmLead(n){
+  google.script.run.withSuccessHandler(function(r){
+    META.team=META.team.filter(function(x){return x!==n;}); fillSelects(); loadTeam(); toast('Removed '+n);
+  }).removeTeamMember(n, AUTH_TOKEN);
+}
+</script>

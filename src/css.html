@@ -1,0 +1,421 @@
+<style>
+/* ======================================================
+   1. THEME TOKENS & VARIABLES (Light/Dark Mode)
+====================================================== */
+:root {
+  --bg1: #eaf7fb; --bg2: #d3ebf2; --bg3: #bfe0eb;
+  --grid: rgba(15, 157, 199, 0.06);
+  --panel: rgba(255, 255, 255, 0.78);
+  --panel2: rgba(255, 255, 255, 0.55);
+  --panelSolid: #ffffff;
+  --card: var(--panel); 
+  
+  --ink: #13384a; --muted: #5d7c8a; --line: rgba(19, 56, 74, 0.12);
+  --cyan: #0f9dc7; --cyanDk: #0b86ac; --green: #54a737; --greenDk: #3f8c2a; 
+  --gold: #e0962a; --red: #d9594a; --blue: #3d8fcf; 
+  --chip: rgba(19, 56, 74, 0.06);
+  --chrome: linear-gradient(180deg, #5e98b0, #2c5f73);
+  
+  --shadow: 0 10px 30px rgba(20, 80, 110, 0.10);
+  --shadowSoft: 0 4px 14px rgba(20, 80, 110, 0.07);
+  --radius: 16px;
+}
+
+html[data-theme="dark"] {
+  --bg1: #0a1525; --bg2: #08101d; --bg3: #060c16;
+  --grid: rgba(57, 194, 236, 0.05);
+  --panel: rgba(18, 33, 54, 0.82);
+  --panel2: rgba(22, 40, 64, 0.6);
+  --panelSolid: #0e1c30;
+  --card: var(--panel);
+  
+  --ink: #e6f1fb; --muted: #8fb0cc; --line: rgba(120, 170, 210, 0.16);
+  --cyan: #39c2ec; --cyanDk: #1aa0cf; --green: #74d96a; --greenDk: #57bf4d; 
+  --gold: #f0b54a; --red: #ef6a55; --blue: #5aa6e0; 
+  --chip: rgba(140, 190, 230, 0.12);
+  --chrome: linear-gradient(180deg, #eaf4ff, #9db8d0);
+  
+  --shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
+  --shadowSoft: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+/* ======================================================
+   2. GLOBAL RESET & BASE (Glass UI)
+====================================================== */
+* { box-sizing: border-box; }
+body {
+  color: var(--ink);
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  margin: 0; min-height: 100vh;
+  background:
+    radial-gradient(circle at 10% 10%, rgba(15, 157, 199, 0.10), transparent 18%),
+    radial-gradient(circle at 92% 88%, rgba(84, 167, 55, 0.09), transparent 20%),
+    linear-gradient(transparent 96%, var(--grid) 96%) 0 0/100% 34px,
+    linear-gradient(90deg, transparent 96%, var(--grid) 96%) 0 0/34px 100%,
+    linear-gradient(158deg, var(--bg1) 0%, var(--bg2) 48%, var(--bg3) 100%);
+  background-attachment: fixed;
+  transition: background 0.4s ease, color 0.25s ease;
+}
+
+.hidden { display: none !important; }
+.wrap { max-width: 1220px; margin: 0 auto; padding: 16px; }
+a { color: var(--cyan); text-decoration: none; }
+
+/* ======================================================
+   3. TYPOGRAPHY & BRANDING
+====================================================== */
+.logo {
+  font-family: 'Chakra Petch'; font-weight: 700; font-size: 25px; letter-spacing: 0.5px;
+  background: var(--chrome); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.logo .in { color: var(--green); -webkit-text-fill-color: var(--green); }
+.tagline { color: var(--muted); font-size: 12px; margin-top: -2px; }
+.sectitle { margin: 0 0 12px; font-family: 'Chakra Petch'; font-size: 17px; }
+.sub { color: var(--muted); font-size: 11px; }
+.empty { color: var(--muted); text-align: center; padding: 24px; font-size: 14px; }
+
+/* ======================================================
+   4. CARDS & LAYOUT
+====================================================== */
+.card {
+  background: var(--card); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow);
+}
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+@media(max-width: 680px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
+
+/* ======================================================
+   5. BUTTONS (Unified & Optimized)
+====================================================== */
+.btn {
+  background: linear-gradient(100deg, var(--cyan), var(--cyanDk)); color: #fff; border: none; border-radius: 11px;
+  padding: 11px 22px; font-weight: 800; font-family: 'Chakra Petch'; cursor: pointer; font-size: 14px;
+  transition: transform 0.08s, filter 0.15s;
+}
+.btn:hover { filter: brightness(1.06); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+
+.btn.primary { background: var(--cyanDk); }
+.btn.green { background: linear-gradient(100deg, var(--green), var(--greenDk)); }
+.btn.red { background: linear-gradient(100deg, #e0705f, #c44a3a); }
+.btn.ghost { background: transparent; color: var(--cyan); border: 1px solid var(--cyan); }
+.btn.icon { padding: 9px 11px; border-radius: 10px; }
+.btn.wa { background: #25D366; }
+.btn.call { background: #ff9800; }
+
+.btn.sm { padding: 7px 12px; font-size: 12px; border-radius: 8px; }
+.actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+#pipeTable .actions, .tablecard .actions { flex-wrap: nowrap; white-space: nowrap; }
+
+/* ======================================================
+   6. FORMS & FILTERS
+====================================================== */
+input, select, textarea {
+  font-family: inherit; font-size: 14px; color: var(--ink); background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; width: 100%; transition: border 0.15s;
+}
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--cyan); }
+input[readonly], input:disabled { background: var(--chip); cursor: not-allowed; opacity: 0.75; }
+select option { color: var(--ink); background: var(--panelSolid); }
+label { font-size: 12px; color: var(--muted); font-weight: 600; display: block; margin: 0 0 4px 2px; }
+
+/* File pickers (New Enquiry's PDF attach, Bulk Import's CSV/Excel) otherwise render as the bare
+   OS widget — a plain grey button + "No file chosen" — which clashes with every other styled
+   field on the page. Restyle the button part to match .btn; the wrapper keeps the usual input look. */
+input[type="file"] { padding: 8px 10px; cursor: pointer; }
+input[type="file"]::file-selector-button, input[type="file"]::-webkit-file-upload-button {
+  background: linear-gradient(100deg, var(--cyan), var(--cyanDk)); color: #fff; border: none; border-radius: 8px;
+  padding: 8px 14px; font-weight: 700; font-family: 'Chakra Petch'; font-size: 12px; cursor: pointer;
+  margin-right: 10px; transition: filter 0.15s;
+}
+input[type="file"]::file-selector-button:hover, input[type="file"]::-webkit-file-upload-button:hover { filter: brightness(1.06); }
+
+.filters {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px; margin-bottom: 12px; align-items: end;
+}
+
+/* Grouped subsections inside longer forms (e.g. Add Enquiry) */
+.form-section { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.form-section:first-of-type { margin-top: 10px; padding-top: 0; border-top: none; }
+.form-subtitle {
+  margin: 0 0 10px; font-family: 'Chakra Petch'; font-size: 13px; font-weight: 700;
+  color: var(--cyan); text-transform: uppercase; letter-spacing: 0.5px;
+}
+
+/* Inline field validation */
+input.input-err, select.input-err, textarea.input-err { border-color: var(--red); }
+.field-err { color: var(--red); font-size: 11px; margin: 4px 0 0 2px; }
+
+/* Non-blocking "this number already has enquiries" notice */
+.dup-warning {
+  background: rgba(224, 150, 42, 0.14); border: 1px solid var(--gold); color: var(--gold);
+  border-radius: 10px; padding: 10px 14px; font-size: 12px; font-weight: 600; margin-bottom: 14px;
+}
+
+/* Order Timeline — horizontal step tracker, wraps to stacked on narrow screens */
+.order-timeline { display: flex; flex-wrap: wrap; }
+.tl-step { display: flex; flex-direction: column; align-items: center; text-align: center; flex: 1; min-width: 90px; position: relative; opacity: .4; }
+.tl-step.done { opacity: 1; }
+.tl-step .tl-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--line); margin-bottom: 6px; z-index: 1; }
+.tl-step.done .tl-dot { background: var(--green); }
+.tl-step.alert .tl-dot { background: var(--red); }
+.tl-step .tl-label { font-size: 11px; font-weight: 700; color: var(--muted); }
+.tl-step.done .tl-label { color: var(--ink); }
+.tl-step:not(:last-child):after { content: ''; position: absolute; top: 6px; left: 55%; width: 90%; height: 2px; background: var(--line); }
+.tl-step.done:not(:last-child):after { background: var(--green); }
+
+/* ======================================================
+   7. TABLES & STICKY HEADER (Foolproof)
+====================================================== */
+.tablecard {
+  display: block; overflow-y: auto !important; overflow-x: auto !important;
+  max-height: 60vh !important; border-radius: 10px; position: relative;
+  border: 1px solid var(--line);
+}
+/* Follow-ups now shows one section at a time instead of three stacked tables, so it can use most of the page. */
+#fuList { max-height: 74vh !important; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+#pipeTable table { min-width: 950px; }
+/* 8 columns (Name..Remark+actions) otherwise get squeezed to fit the card width — the Priority
+   select and Remark input shrink until their own text truncates ("Bat…", "Optio…"). Forcing a
+   min-width lets the card's own overflow-x:auto scroll horizontally instead of squashing them. */
+#bulkRowsTable table { min-width: 820px; }
+#bulkRowsTable select, #bulkRowsTable input { min-width: 90px; }
+
+#pipeTable thead th, .tablecard thead th, .tablecard th {
+  position: sticky !important; top: 0 !important; z-index: 50 !important;
+  background: var(--panelSolid) !important;
+  box-shadow: inset 0 -2px 0 var(--line), 0 4px 6px -4px rgba(0,0,0,0.1) !important;
+}
+
+th { text-align: left; padding: 14px 12px; color: var(--muted); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
+td { padding: 14px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:hover td { background: rgba(15, 157, 199, 0.08); }
+#pipeTable tbody tr:nth-child(even), .tablecard tbody tr:nth-child(even) { background: rgba(15, 157, 199, 0.03); }
+#pipeTable tbody tr, .tablecard tbody tr { transition: 0.18s ease; }
+
+/* ======================================================
+   8. BADGES & PILLS
+====================================================== */
+.badge {
+  display: inline-block; padding: 5px 12px; border-radius: 30px; font-size: 11px;
+  font-weight: 700; font-family: 'Chakra Petch'; background: var(--chip);
+}
+.b-New { color: #2f9fd0; } .b-Quoted { color: var(--blue); } .b-Followup { color: var(--gold); }
+.b-Won { color: var(--green); } .b-Lost { color: var(--red); } .b-Dispatched { color: var(--cyan); } .b-Closed { color: var(--muted); }
+.pri-Hot, .due-over { color: var(--red); font-weight: 700; } 
+.pri-Warm { color: var(--gold); font-weight: 700; } 
+.pri-Cold { color: var(--blue); font-weight: 700; }
+.due-today { color: var(--green); font-weight: 700; }
+
+.badge-info { color: var(--blue); background: rgba(61, 143, 207, 0.15); }
+.pill { display: inline-block; padding: 3px 9px; border-radius: 8px; background: var(--chip); font-size: 11px; font-weight: 700; color: var(--muted); margin-right: 5px; }
+.chiprow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.teamchip { display: flex; align-items: center; gap: 6px; background: var(--chip); border: 1px solid var(--line); border-radius: 20px; padding: 5px 6px 5px 12px; font-size: 12px; font-weight: 600; }
+.teamchip button { border: none; background: transparent; color: var(--red); cursor: pointer; font-size: 14px; line-height: 1; }
+
+/* ======================================================
+   9. MODAL & PREMIUM CUSTOMER 360
+====================================================== */
+.modal-bg { position: fixed; inset: 0; background: rgba(6, 20, 32, 0.65); display: flex; align-items: flex-start; justify-content: center; padding: 24px 14px; z-index: 100; overflow: auto; backdrop-filter: blur(4px); }
+.modal { max-width: 600px; width: 100%; margin-top: 14px; }
+
+.crm-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.crm-left { display: flex; align-items: center; gap: 15px; }
+.crm-avatar { width: 64px; height: 64px; border-radius: 50%; background: linear-gradient(135deg, var(--cyan), var(--green)); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; font-family: 'Chakra Petch'; box-shadow: var(--shadowSoft); }
+.crm-title h2 { margin: 0; font-size: 22px; font-family: 'Chakra Petch'; }
+.crm-sub { color: var(--muted); margin-top: 3px; font-size: 13px; }
+.crm-tags, .crm-action { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+
+.info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin: 18px 0; }
+.info-card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; box-shadow: var(--shadowSoft); }
+.info-card h4 { margin: 0 0 14px; font-size: 15px; font-family: 'Chakra Petch'; color: var(--cyan); }
+.timeline-card { margin-top: 18px; }
+
+.detrow { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+.detrow:last-child { border-bottom: none; }
+.detrow .k { color: var(--muted); white-space: nowrap; }
+.detrow .v { font-weight: 600; text-align: right; word-break: break-word; }
+.detrow .v.v-phone { font-size: 18px; font-weight: 700; letter-spacing: 0.4px; color: var(--ink); }
+
+.hist { font-size: 12px; border-left: 3px solid var(--cyan); padding: 10px 14px; margin: 10px 0; background: rgba(15, 157, 199, 0.05); border-radius: 0 8px 8px 0; }
+
+/* ======================================================
+   10. TIMELINE, SPINNER & TOAST (Animations)
+====================================================== */
+.tl { position: relative; padding-left: 22px; }
+.tl:before { content: ''; position: absolute; left: 6px; top: 4px; bottom: 4px; width: 2px; background: var(--line); }
+.tlitem { position: relative; margin-bottom: 14px; }
+.tldot { position: absolute; left: -22px; top: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--cyan); border: 2px solid var(--panelSolid); }
+.tlcard { background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+
+.spin { display: inline-block; width: 15px; height: 15px; border: 2px solid rgba(255, 255, 255, 0.4); border-top-color: #fff; border-radius: 50%; animation: sp 0.7s linear infinite; vertical-align: -2px; }
+@keyframes sp { to { transform: rotate(360deg); } }
+@keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--panelSolid); padding: 12px 22px; border-radius: 11px; font-weight: 600; z-index: 999; box-shadow: var(--shadow); }
+html[data-theme="dark"] .toast { background: #dff0fb; color: #0a1525; }
+
+/* ======================================================
+   11. TOPBAR & DASHBOARD KPI
+====================================================== */
+.topbar { position: sticky; top: 0; z-index: 30; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); background: var(--panel2); border-bottom: 1px solid var(--line); }
+.head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; max-width: 1220px; margin: 0 auto; padding: 12px 16px; }
+.head-actions { display: flex; gap: 8px; align-items: center; }
+.themeToggle { width: 46px; height: 26px; border-radius: 20px; background: var(--chip); border: 1px solid var(--line); position: relative; cursor: pointer; flex: none; }
+.themeToggle .knob { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: linear-gradient(180deg, var(--cyan), var(--cyanDk)); transition: left 0.25s; display: flex; align-items: center; justify-content: center; font-size: 11px; }
+html[data-theme="dark"] .themeToggle .knob { left: 22px; }
+
+/* Nav — a collapsible left sidebar (hamburger-toggled), not a top tab strip. Off-canvas overlay
+   (transform + backdrop) rather than a push-layout so the rest of the page markup/CSS needed no
+   restructuring — it just slides over the content and closes itself when a tab is picked. */
+.sidebarToggle { font-size: 20px; line-height: 1; padding: 6px 10px; }
+.sidebarBackdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 39; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+.sidebarBackdrop.open { opacity: 1; pointer-events: auto; }
+.tabs {
+  position: fixed; top: 0; left: 0; height: 100vh; width: 250px; z-index: 40;
+  display: flex; flex-direction: column; gap: 2px; padding: 16px 10px;
+  background: var(--panel2); border-right: 1px solid var(--line);
+  transform: translateX(-100%); transition: transform 0.22s ease; overflow-y: auto;
+}
+.tabs.open { transform: translateX(0); }
+.tabs .sidebarHead { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px 14px; }
+.tab { padding: 12px 14px; cursor: pointer; font-weight: 700; font-size: 13px; font-family: 'Chakra Petch'; background: transparent; border: none; border-radius: 8px; border-left: 3px solid transparent; color: var(--muted); transition: 0.15s; display: flex; align-items: center; gap: 6px; }
+.tab:hover { color: var(--ink); background: var(--chip); }
+.tab.active { color: var(--cyan); border-left-color: var(--cyan); background: var(--chip); }
+.view { display: none; animation: fade 0.25s ease; padding-top: 20px; } .view.active { display: block; }
+
+.howStepNum { flex-shrink: 0; width: 30px; height: 30px; border-radius: 999px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; background: color-mix(in srgb, var(--cyan) 15%, transparent); color: var(--cyan); }
+
+.kpis{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:18px;
+  margin-bottom:22px;
+}
+
+.kpi {
+  position: relative;
+  transition: .2s ease;
+  cursor: pointer;
+  padding: 16px;
+  background: var(--card);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+}
+
+.kpi:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 14px 32px rgba(0,0,0,.12);
+}
+
+.kpi .v {
+  font-family: 'Chakra Petch';
+  font-size: 30px;
+  font-weight: 800;
+  margin-bottom: 6px;
+  line-height: 1;
+}
+
+.kpi .l {
+  font-size: 13px;
+  font-weight: 600;
+  opacity: .85;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+/* Naye KPI Colors */
+.kpi.acc { border-left: 6px solid var(--cyan); }
+.kpi.good { border-left: 6px solid var(--green); }
+.kpi.hot { border-left: 6px solid #ff3d3d; }
+.kpi.warm { border-left: 6px solid orange; }
+.kpi.cold { border-left: 6px solid #2196f3; }
+.kpi.today { border-left: 6px solid #00b894; }
+.kpi.purple { border-left: 6px solid #8e44ad; }
+.kpi.alert { border-left: 6px solid red; }
+
+.funnel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 10px;
+}
+.frow { display: flex; align-items: center; gap: 10px; }
+
+.fbar {
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #06b6d4, #0ea5e9);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 12px;
+  font-weight: 700;
+  color: #fff;
+  transition: .4s;
+}
+.flab { width: 96px; font-size: 13px; font-weight: 600; color: var(--muted); }
+
+/* Gate & Setup Toolbars */
+.gate { min-height: 100vh; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 14px; padding: 0 16px; }
+.gatebox { width: 100%; max-width: 330px; text-align: center; }
+.pinwrap { display: flex; gap: 8px; margin-top: 12px; }
+.pwfield { position: relative; }
+.pwfield input { padding-right: 40px; }
+.pw-eye {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  background: transparent; border: none; cursor: pointer; font-size: 15px; line-height: 1;
+  padding: 8px; color: var(--muted); opacity: 0.75;
+}
+.pw-eye:hover { opacity: 1; }
+.pipe-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 16px 0; flex-wrap: wrap; }
+.pipe-left { display: flex; gap: 10px; flex-wrap: wrap; }
+.pipe-right { margin-left: auto; font-weight: 700; color: var(--cyan); }
+
+.chart-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 15px;
+  margin-bottom: 20px;
+}
+@media(max-width: 900px) {
+  .chart-grid-3 { grid-template-columns: 1fr; }
+}
+
+/* ======================================================
+   12. DATA TABLE COMPONENT (sort / search / columns / bulk actions)
+====================================================== */
+.dt-wrap { display: flex; flex-direction: column; gap: 10px; }
+.dt-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dt-search input { max-width: 280px; }
+.dt-tools { position: relative; display: flex; gap: 8px; align-items: center; }
+.dt-colmenu {
+  display: none; position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
+  min-width: 190px; background: var(--panelSolid); border: 1px solid var(--line);
+  border-radius: 10px; box-shadow: var(--shadow); padding: 8px;
+}
+.dt-colmenu.open { display: block; }
+.dt-colmenu label { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--ink); padding: 6px 4px; cursor: pointer; }
+.dt-colmenu input[type="checkbox"] { width: auto; }
+
+.dt-bulkbar {
+  display: flex; align-items: center; gap: 10px; background: var(--chip);
+  border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px;
+  font-size: 12px; font-weight: 700; flex-wrap: wrap;
+}
+.dt-bulkbar .grow { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+
+.dt-scroll thead th.dt-th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
+.dt-th-sort .arrow { opacity: 0.35; margin-left: 4px; font-size: 10px; }
+.dt-th-sort.active .arrow { opacity: 1; color: var(--cyan); }
+.dt-checkbox-col { width: 34px; text-align: center; }
+.dt-checkbox-col input { width: auto; }
+
+.dt-pagination { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dt-pagination .dt-pagesize select { width: auto; padding: 6px 8px; }
+
+</style>

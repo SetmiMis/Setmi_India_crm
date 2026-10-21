@@ -1,0 +1,14 @@
+{
+  "name": "setmi-india-crm",
+  "private": true,
+  "description": "SETMI INDIA Sales / Enquiry-to-Order FMS (Google Apps Script + Google Sheets) — source baseline, docs and CI checks",
+  "license": "UNLICENSED",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "check:structure": "node scripts/check-structure.js",
+    "check:syntax": "node scripts/check-syntax.js",
+    "check:secrets": "node scripts/check-secrets.js",
+    "test": "TZ=Asia/Kolkata node --test tests/unit/*.test.js",
+    "ci": "npm run check:structure && npm run check:syntax && npm run check:secrets && npm test"
+  }
+}

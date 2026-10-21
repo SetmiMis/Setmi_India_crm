@@ -1,0 +1,106 @@
+<script>
+/* USERS — admin-only management page. Was Sheet-menu only (addUserFromMenu); this gives admins
+   an in-app view without needing spreadsheet edit access. Role/active toggles are real <button>
+   elements with aria-pressed so screen readers and keyboard users get the actual state, not just
+   a styled div. */
+var USERS_TABLE = null;
+
+function getUsersTable_() {
+  if (USERS_TABLE) return USERS_TABLE;
+  USERS_TABLE = new DataTable({
+    id: 'usersTable',
+    searchable: true,
+    searchPlaceholder: 'Search username / name…',
+    pageSizeOptions: [25, 50, 100],
+    emptyText: 'No users yet — add one below.',
+    defaultSort: { key: 'name', dir: 'asc' },
+    rowKey: function(r) { return r.username; },
+    columns: [
+      { key: 'name', label: 'Name', render: function(r) { return '<b>'+esc(r.name)+'</b><div class="sub">'+esc(r.username)+'</div>'; } },
+      { key: 'role', label: 'Role', render: function(r) {
+          return '<button type="button" class="btn sm '+(r.role==='admin'?'':'ghost')+'" aria-pressed="'+(r.role==='admin')+'" '+
+            'onclick="toggleUserRole(\''+r.username+'\',\''+r.role+'\')">'+(r.role==='admin'?'👑 Admin':'Rep')+'</button>';
+        } },
+      { key: 'active', label: 'Status', render: function(r) {
+          return '<button type="button" class="btn sm '+(r.active?'green':'ghost')+'" aria-pressed="'+r.active+'" '+
+            'onclick="toggleUserActive(\''+r.username+'\','+r.active+')">'+(r.active?'✅ Active':'⛔ Inactive')+'</button>';
+        } },
+      { key: 'reset', label: '', render: function(r) {
+          return '<button type="button" class="btn sm ghost" onclick="resetUserPasswordForm(\''+r.username+'\')">🔑 Reset Password</button>';
+        } }
+    ]
+  }).mount();
+  return USERS_TABLE;
+}
+
+function loadUsers(){
+  google.script.run.withSuccessHandler(function(list){
+    getUsersTable_().setRows(list || []);
+  }).withFailureHandler(function(err){ handleAuthError(err, 'Error loading users'); }).listUsersForAdmin(AUTH_TOKEN);
+}
+
+function toggleUserRole(username, currentRole){
+  var next = currentRole==='admin' ? 'rep' : 'admin';
+  if (!confirm((next==='admin'?'Make ':'Remove admin from ')+username+'?')) return;
+  google.script.run.withSuccessHandler(function(r){
+    toast(r.msg||(r.ok?'Updated':'Failed'));
+    if (r.ok) loadUsers();
+  }).withFailureHandler(function(err){ handleAuthError(err, 'Failed'); }).setUserRole(username, next, AUTH_TOKEN);
+}
+
+function toggleUserActive(username, currentActive){
+  google.script.run.withSuccessHandler(function(r){
+    toast(r.msg||(r.ok?'Updated':'Failed'));
+    if (r.ok) loadUsers();
+  }).withFailureHandler(function(err){ handleAuthError(err, 'Failed'); }).setUserActive(username, !currentActive, AUTH_TOKEN);
+}
+
+function resetUserPasswordForm(username){
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">'+
+      '<h3 class="sectitle" style="margin:0">Reset Password — '+esc(username)+'</h3>'+
+      '<button class="btn ghost sm" onclick="closeModal()">✕</button></div>'+
+    '<div><label>New Password</label><input id="rpPassword" type="password" placeholder="Min 6 characters"></div>'+
+    '<div id="rpErr" class="sub" style="color:var(--red);margin-top:8px"></div>'+
+    '<div style="margin-top:14px;display:flex;gap:10px">'+
+      '<button class="btn sm" onclick="commitResetPassword(\''+username+'\')">Reset</button>'+
+      '<button class="btn ghost sm" onclick="closeModal()">Cancel</button>'+
+    '</div>';
+  document.getElementById('modalBody').innerHTML = html;
+  document.getElementById('modalBg').classList.remove('hidden');
+}
+
+function commitResetPassword(username){
+  var p = val('rpPassword');
+  var errEl = document.getElementById('rpErr');
+  google.script.run.withSuccessHandler(function(r){
+    if (r.ok){ toast(r.msg||'Reset'); closeModal(); }
+    else errEl.textContent = r.msg || 'Failed';
+  }).withFailureHandler(function(err){ handleAuthError(err, 'Failed to reset password'); }).adminResetPassword(username, p, AUTH_TOKEN);
+}
+
+function addUserForm(){
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">'+
+      '<h3 class="sectitle" style="margin:0">Add User</h3>'+
+      '<button class="btn ghost sm" onclick="closeModal()">✕</button></div>'+
+    '<div><label>Username</label><input id="nuUsername" placeholder="lowercase, no spaces"></div>'+
+    '<div style="margin-top:10px"><label>Full Name</label><input id="nuName"></div>'+
+    '<div style="margin-top:10px"><label>Password</label><input id="nuPassword" type="password" placeholder="Min 6 characters"></div>'+
+    '<div style="margin-top:10px"><label>Role</label><select id="nuRole"><option value="rep">Rep</option><option value="admin">Admin</option></select></div>'+
+    '<div id="nuErr" class="sub" style="color:var(--red);margin-top:8px"></div>'+
+    '<div style="margin-top:14px;display:flex;gap:10px">'+
+      '<button class="btn sm" onclick="commitAddUser()">Add User</button>'+
+      '<button class="btn ghost sm" onclick="closeModal()">Cancel</button>'+
+    '</div>';
+  document.getElementById('modalBody').innerHTML = html;
+  document.getElementById('modalBg').classList.remove('hidden');
+}
+
+function commitAddUser(){
+  var u = val('nuUsername'), n = val('nuName'), p = val('nuPassword'), role = val('nuRole');
+  var errEl = document.getElementById('nuErr');
+  google.script.run.withSuccessHandler(function(r){
+    if (r.ok){ toast(r.msg||'Added'); closeModal(); loadUsers(); }
+    else errEl.textContent = r.msg || 'Failed';
+  }).withFailureHandler(function(err){ handleAuthError(err, 'Failed to add user'); }).addUser(u, n, p, role, AUTH_TOKEN);
+}
+</script>

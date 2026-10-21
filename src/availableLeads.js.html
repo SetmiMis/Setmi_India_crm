@@ -1,0 +1,116 @@
+<script>
+/* =====================================================
+   AVAILABLE LEADS — claim system (step 2 of the Vercel feature backport).
+   Unclaimed open enquiries (LeadBy blank) that any signed-in rep can call and claim, instead of
+   being auto-assigned. Matches Vercel's Available Leads page.
+===================================================== */
+var AVAIL_DATA = [];
+
+function availRow(e){
+  return '<tr>'+
+    '<td><b>'+esc(e.Customer)+'</b><div class="sub">'+esc(e.Company||'')+' · '+e.EnqID+'</div></td>'+
+    '<td>'+esc(e.Phone||'')+'<div class="sub">'+esc(e.City||'')+'</div></td>'+
+    '<td>'+esc(e.Requirement||'')+'</td>'+
+    '<td>'+esc(e.Source||'')+'</td>'+
+    '<td>'+esc(e.EnqDate||'—')+'</td>'+
+    '<td class="actions" style="white-space:nowrap">'+
+      '<button class="btn sm" onclick="openDetail(\''+e.EnqID+'\')">View</button>'+
+      '<button class="btn green sm" onclick="claimLead(\''+e.EnqID+'\')">📞 Call &amp; Claim</button>'+
+    '</td></tr>';
+}
+
+function renderAvail(){
+  var q = (val('availSearch')||'').trim().toLowerCase();
+  var rows = !q ? AVAIL_DATA : AVAIL_DATA.filter(function(e){
+    return ((e.Customer||'')+' '+(e.Company||'')+' '+(e.Phone||'')+' '+(e.Requirement||'')+' '+(e.City||'')).toLowerCase().indexOf(q) > -1;
+  });
+  var countEl = document.getElementById('availCount');
+  if (countEl) countEl.textContent = 'Showing ' + rows.length + (q ? ' of ' + AVAIL_DATA.length : '');
+  var el = document.getElementById('availList');
+  if (!el) return;
+  el.innerHTML = rows.length
+    ? '<div class="tablecard"><table><thead><tr><th>Customer</th><th>Contact</th><th>Requirement</th><th>Source</th><th>Enq Date</th><th>Action</th></tr></thead><tbody>'+rows.map(availRow).join('')+'</tbody></table></div>'
+    : (q ? '<div class="empty">No matching leads.</div>' : '<div class="empty">No unclaimed leads — everything has an owner. 🎉</div>');
+}
+
+// Manual trigger for the same Meta Ads leads sheet import a 30-min auto-trigger runs in the
+// background (Sales FMS menu -> Start Auto-Import) — lets someone pull new leads on demand without
+// waiting, e.g. right after a campaign goes live. Lives here (not Pending Approvals) because Meta
+// leads bypass Pending entirely and land straight on Available Leads.
+function importMetaLeadsNow_(){
+  var btn = document.getElementById('importMetaBtn');
+  if (btn){ btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Importing…'; }
+  google.script.run.withSuccessHandler(function(r){
+    if (btn){ btn.disabled = false; btn.innerHTML = '🔄 Import Meta Ads Leads'; }
+    toast(r.msg || (r.ok ? 'Done' : 'Failed'));
+    if (r.ok && r.imported) { refreshAll(); loadAvailableLeads(); }
+  }).withFailureHandler(function(err){
+    if (btn){ btn.disabled = false; btn.innerHTML = '🔄 Import Meta Ads Leads'; }
+    handleAuthError(err, 'Import failed');
+  }).importMetaLeadsNow(AUTH_TOKEN);
+}
+
+function loadAvailableLeads(){
+  google.script.run.withSuccessHandler(function(list){
+    AVAIL_DATA = list || [];
+    renderAvail();
+  }).withFailureHandler(function(err){ handleAuthError(err, 'Error loading available leads'); }).getUnclaimedEnquiries(AUTH_TOKEN);
+}
+
+// One combined modal — call the lead right from here, then set Priority and Claim, instead of
+// "Call" (a separate tel: link) and "Claim" being two disconnected actions on the row. Priority is
+// asked after the call step, not before, since that's when a rep actually knows it. Reuses the
+// app's own modal (modal.js.html's #modalBg/#modalBody), not a browser prompt().
+function claimLead(id){
+  var e = AVAIL_DATA.filter(function(x){ return x.EnqID===id; })[0];
+  if (!e) return;
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">'+
+      '<h3 class="sectitle" style="margin:0">'+esc(e.Customer)+'</h3>'+
+      '<button class="btn ghost sm" onclick="closeModal()">✕</button></div>'+
+    '<p class="sub">'+esc(e.Requirement||'')+'</p>'+
+    (e.Phone ? '<a class="btn call" style="margin-top:10px;width:100%;justify-content:center" href="'+telLink(e.Phone)+'">📞 Call '+esc(e.Phone)+'</a>' : '<p class="sub" style="color:var(--red)">No phone number on file.</p>')+
+    '<p class="sub" style="margin-top:14px;margin-bottom:6px">Call kar liya? Priority daalo — lead turant tumhare naam ho jayegi.</p>'+
+    '<div><label>Priority</label><select id="claimPri">'+opts(META.priorities,'Warm')+'</select></div>'+
+    '<div class="grid3" style="margin-top:8px">'+
+      '<div><label>Call Status</label><select id="claimCallStatus" onchange="toggleClaimInterest_()">'+opts(META.callStatuses)+'</select></div>'+
+      '<div><label>Next Follow-up</label><input id="claimNext" type="date"></div>'+
+    '</div>'+
+    '<div id="claimInterestWrap" style="margin-top:8px"><label>Customer Interested?</label>'+
+      '<select id="claimInterest"><option value="">— Not asked / N-A —</option>'+opts(META.interestLevels)+'</select></div>'+
+    '<div style="margin-top:8px"><label>Call Remarks</label><input id="claimRemarks" placeholder="What was discussed"></div>'+
+    '<div style="margin-top:14px;display:flex;gap:10px">'+
+      '<button class="btn green sm" id="claimBtn" onclick="commitClaim(\''+id+'\')">✋ Claim</button>'+
+      '<button class="btn ghost sm" onclick="closeModal()">Cancel</button>'+
+    '</div>';
+  document.getElementById('modalBody').innerHTML = html;
+  document.getElementById('modalBg').classList.remove('hidden');
+}
+
+function toggleClaimInterest_(){
+  var wrap = document.getElementById('claimInterestWrap');
+  var connected = val('claimCallStatus') === 'Connected';
+  if (wrap) wrap.style.display = connected ? '' : 'none';
+  if (!connected) setv('claimInterest','');
+}
+
+// Claim first (so the lead is ours), then log the call via the same logCall() the enquiry
+// detail modal uses — lands in Call History + Activity Timeline identically.
+function commitClaim(id){
+  var priority = val('claimPri');
+  var e = AVAIL_DATA.filter(function(x){ return x.EnqID===id; })[0] || {};
+  var call = { id:id, customer:e.Customer, employee:CURRENT_USER && CURRENT_USER.name,
+    callStatus:val('claimCallStatus'), interest:val('claimInterest'),
+    remarks:val('claimRemarks'), nextFollowUp:val('claimNext') };
+  var btn = document.getElementById('claimBtn');
+  if (btn){ btn.disabled = true; btn.innerHTML = '<span class="spin"></span>'; }
+  function done(msg){ toast(msg); closeModal(); loadAvailableLeads(); refreshAll(); }
+  google.script.run.withSuccessHandler(function(res){
+    if (res.ok){
+      google.script.run.withSuccessHandler(function(r){
+        done((res.msg||'Claimed') + (r && r.ok ? ' · call logged' : ' · call log failed: '+(r&&r.msg)));
+      }).withFailureHandler(function(){ done('Claimed, but call log failed'); }).logCall(call, AUTH_TOKEN);
+    }
+    else { toast(res.msg||'Failed'); if (btn){ btn.disabled = false; btn.innerHTML = '✋ Claim'; } }
+  }).withFailureHandler(function(err){ handleAuthError(err, 'Claim failed'); }).claimEnquiry(id, priority, AUTH_TOKEN);
+}
+</script>

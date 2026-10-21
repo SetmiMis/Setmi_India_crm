@@ -1,0 +1,374 @@
+<script>
+function toggleTheme(){
+  THEME = (THEME==='light')?'dark':'light';
+  document.documentElement.setAttribute('data-theme',THEME);
+  document.getElementById('knob').textContent = THEME==='light'?'☀':'☾';
+}
+
+// Session persists across a browser refresh via localStorage — otherwise the CacheService token
+// on the server (good for 6h) is useless the moment the tab reloads, since AUTH_TOKEN is just a JS
+// variable that resets to ''. restoreSession_() (called once on page load, see bottom of Index.html)
+// reads this back and re-validates it against the server before trusting it.
+var SESSION_KEY_ = 'fms_session';
+function saveSession_(token, user){
+  try{ localStorage.setItem(SESSION_KEY_, JSON.stringify({token:token, user:user})); }catch(e){}
+}
+function clearSession_(){
+  try{ localStorage.removeItem(SESSION_KEY_); }catch(e){}
+}
+
+function tryLogin(){
+  document.getElementById('loginErr').textContent = '';
+  google.script.run.withSuccessHandler(function(res){
+    if(res.ok){
+      AUTH_TOKEN = res.token||'';
+      CURRENT_USER = {u:res.username, name:res.name, role:res.role};
+      saveSession_(AUTH_TOKEN, CURRENT_USER);
+      openApp();
+    } else {
+      document.getElementById('loginErr').textContent = res.msg || 'Galat username ya password';
+    }
+  }).withFailureHandler(function(err){
+    document.getElementById('loginErr').textContent = 'Error: ' + (err && err.message || err);
+  }).login(val('loginUser'), val('loginPass'));
+}
+
+function tryPin(){
+  google.script.run.withSuccessHandler(function(res){
+    if(res.ok){
+      AUTH_TOKEN = res.token||'';
+      CURRENT_USER = {u:'admin', name:res.name||'Admin', role:res.role||'admin'};
+      saveSession_(AUTH_TOKEN, CURRENT_USER);
+      openApp();
+    }
+    else { document.getElementById('pinErr').textContent='Galat PIN'; }
+  }).checkPin(val('pinInput'));
+}
+
+// Called once on page load (see Index.html) — if a saved session exists, check with the server
+// that its token is still valid before skipping the gate. Falls back to the normal login screen
+// on any failure (expired token, cleared PIN, cache miss, etc.) rather than getting stuck.
+// Index.html hides the gate up front via inline style whenever localStorage has a saved session,
+// on the assumption restoreSession_() below will validate it and open the app. Every path through
+// restoreSession_() that does NOT end in openApp() must call this, or the page is left permanently
+// blank (gate hidden, app hidden) — the bail-outs before the whoAmI() call are as much at risk of
+// this as an actual failed/expired token is.
+function showGate_(){
+  var gateEl = document.getElementById('gate');
+  gateEl.classList.remove('hidden');
+  gateEl.style.display = '';
+}
+function restoreSession_(){
+  var raw;
+  try{ raw = localStorage.getItem(SESSION_KEY_); }catch(e){ showGate_(); return; }
+  if (!raw){ showGate_(); return; }
+  var saved;
+  try{ saved = JSON.parse(raw); }catch(e){ clearSession_(); showGate_(); return; }
+  if (!saved || !saved.token){ clearSession_(); showGate_(); return; }
+
+  google.script.run.withSuccessHandler(function(user){
+    AUTH_TOKEN = saved.token;
+    CURRENT_USER = user;
+    openApp();
+  }).withFailureHandler(function(){
+    clearSession_();
+    showGate_();
+  }).whoAmI(saved.token);
+}
+
+function showPinGate(){
+  document.getElementById('loginBlock').classList.add('hidden');
+  document.getElementById('forgotBlock').classList.add('hidden');
+  document.getElementById('pinBlock').classList.remove('hidden');
+}
+function showLoginGate(){
+  document.getElementById('pinBlock').classList.add('hidden');
+  document.getElementById('forgotBlock').classList.add('hidden');
+  document.getElementById('loginBlock').classList.remove('hidden');
+}
+function showForgotGate(){
+  document.getElementById('loginBlock').classList.add('hidden');
+  document.getElementById('pinBlock').classList.add('hidden');
+  document.getElementById('forgotBlock').classList.remove('hidden');
+}
+function togglePasswordVisibility(){
+  var input = document.getElementById('loginPass');
+  var btn = document.querySelector('.pw-eye');
+  var show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  btn.textContent = show ? '🙈' : '👁';
+  btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+}
+function tryForgot(){
+  document.getElementById('forgotErr').textContent = '';
+  document.getElementById('forgotOk').textContent = '';
+  var u = val('forgotUser');
+  if (!u){ document.getElementById('forgotErr').textContent = 'Username daaliye.'; return; }
+  google.script.run.withSuccessHandler(function(res){
+    if (res.ok) document.getElementById('forgotOk').textContent = res.msg || 'Admin ko notify kar diya gaya hai.';
+    else document.getElementById('forgotErr').textContent = res.msg || 'Kuch galat ho gaya.';
+  }).withFailureHandler(function(err){
+    document.getElementById('forgotErr').textContent = 'Error: ' + (err && err.message || err);
+  }).requestPasswordReset(u);
+}
+
+function openApp(){
+  document.getElementById('gate').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  applyRoleVisibility_();
+  var nameEl = document.getElementById('sidebarUserName');
+  if (nameEl) nameEl.textContent = CURRENT_USER ? (CURRENT_USER.name + ' · ' + (CURRENT_USER.role==='admin'?'Admin':'Rep')) : '';
+  fillSelects(); refreshAll();
+}
+
+function logout(){
+  closeSidebar();
+  AUTH_TOKEN = '';
+  CURRENT_USER = null;
+  clearSession_();
+  document.getElementById('app').classList.add('hidden');
+  showGate_(); // also clears the inline display:none Index.html sets on load when a session exists
+  showLoginGate();
+  setv('loginUser',''); setv('loginPass','');
+}
+
+// Reports/Team Performance are admin-only — hide the tabs for a rep. The real gate is server-side
+// (getReports()/getTeamPerformance() throw "Admins only." for a non-admin token regardless), this
+// just avoids showing a tab that would only error out.
+function applyRoleVisibility_(){
+  var isAdmin = !!(CURRENT_USER && CURRENT_USER.role === 'admin');
+  document.querySelectorAll('.admin-only').forEach(function(el){
+    el.classList.toggle('hidden', !isAdmin);
+  });
+}
+
+// Any google.script.run call that carries AUTH_TOKEN can come back with the server's
+// "Session expired" error once the CacheService token times out (or the PIN gate was
+// re-enabled). Route every such failure through here instead of a raw toast/console.error
+// so the user lands back on the login screen instead of a wall of silent/confusing errors.
+function isSessionExpired_(err){
+  return !!(err && /Session expired/i.test(err.message || err || ''));
+}
+function handleAuthError(err, fallbackMsg){
+  if (isSessionExpired_(err)){
+    AUTH_TOKEN = '';
+    CURRENT_USER = null;
+    clearSession_();
+    document.getElementById('app').classList.add('hidden');
+    document.getElementById('gate').classList.remove('hidden');
+    var le = document.getElementById('loginErr');
+    if (le) le.textContent = 'Session expired — please sign in again.';
+    return true;
+  }
+  toast(fallbackMsg || ('Error: ' + (err && err.message || err)));
+  return false;
+}
+
+// arr defaults to [] because restoreSession_()'s whoAmI callback calls openApp()->fillSelects()
+// independently of the getConfigMeta callback that populates META (Index.html) — on an auto-login
+// from a saved session, whoAmI can resolve first, so fillSelects() runs while META is still {}.
+// Without the guard, arr.map() on undefined threw here and silently killed the rest of openApp(),
+// including refreshAll() — which is why the Dashboard sometimes never loaded after a page refresh.
+function opts(arr,sel){ arr = arr||[]; return arr.map(function(x){return '<option'+(x===sel?' selected':'')+'>'+esc(x)+'</option>';}).join(''); }
+
+/* DRILL-THROUGH NAVIGATION — used by clickable Dashboard KPI cards to jump straight to the
+   filtered records behind a number instead of just showing the count. */
+var PIPE_EXTRA_FILTER = null; // {stage:[...], label:'...'} — for filters with no matching visible dropdown
+
+function goToPipelineFiltered(fieldValues, extra){
+  ['fq','fStage','fPriority','fFollow','fLead','fSource','fCity','fState','fCompany','fDateFrom','fDateTo'].forEach(function(id){
+    var el = document.getElementById(id); if (el) el.value = '';
+  });
+  Object.keys(fieldValues||{}).forEach(function(id){
+    var el = document.getElementById(id); if (el) el.value = fieldValues[id];
+  });
+  PIPE_EXTRA_FILTER = extra || null;
+  showTab(document.querySelector('.tab[onclick*="v-pipe"]'), 'v-pipe');
+}
+
+function goToFollowupsSection(section){
+  var sel = document.getElementById('fuFilter');
+  if (sel) sel.value = section;
+  showTab(document.querySelector('.tab[onclick*="v-fu"]'), 'v-fu');
+}
+
+function fillSelects(){
+
+  // New Enquiry
+  document.getElementById("nSource").innerHTML = opts(META.sources);
+  document.getElementById("nTimeline").innerHTML = '<option value="">--</option>' + opts(META.timelines);
+  document.getElementById("nPri").innerHTML    = opts(META.priorities,"Warm");
+  // Defaults to the logged-in rep's own name — without this it silently defaulted to whichever
+  // team member happened to be first in the sheet, so a submitted enquiry could land on the
+  // wrong rep unless someone caught it and changed the dropdown by hand.
+  document.getElementById("nLead").innerHTML   = opts(META.team, CURRENT_USER && CURRENT_USER.name);
+
+  // Pipeline Filters
+  document.getElementById("fStage").innerHTML =
+      '<option value="">All Stages</option>' + opts(META.stages);
+
+  document.getElementById("fSource").innerHTML =
+      '<option value="">All Sources</option>' + opts(META.sources);
+
+  document.getElementById("fLead").innerHTML =
+      '<option value="">All Lead By</option>' + opts(META.team);
+
+  document.getElementById("fPriority").innerHTML =
+      '<option value="">All Priority</option>' + opts(META.priorities);
+}
+
+function toggleSidebar(){
+  document.getElementById('sidebarNav').classList.toggle('open');
+  document.getElementById('sidebarBackdrop').classList.toggle('open');
+}
+function closeSidebar(){
+  document.getElementById('sidebarNav').classList.remove('open');
+  document.getElementById('sidebarBackdrop').classList.remove('open');
+}
+
+function showTab(el,id){
+    document.querySelectorAll(".tab").forEach(function(t){
+        t.classList.remove("active");
+    });
+    if(el) el.classList.add("active");
+    closeSidebar();
+    
+    document.querySelectorAll(".view").forEach(function(v){
+        v.classList.remove("active");
+    });
+    
+    const page=document.getElementById(id);
+    if(!page){
+        console.error(id+" not found");
+        return;
+    }
+    page.classList.add("active");
+    
+    switch(id){
+        case "v-pipe":
+            loadPipe();
+            break;
+        case "v-fu":
+            loadFollowups();
+            break;
+        case "v-avail":
+            loadAvailableLeads();
+            break;
+        case "v-rep":
+            loadReports();
+            break;
+        case "v-team":
+            loadTeamPerformance();
+            break;
+        case "v-users":
+            loadUsers();
+            break;
+        case "v-pend":
+            loadPending();
+            break;
+        case "v-cust":
+            loadCustomers();
+            loadTeam();
+            break;
+        case "v-map":
+            loadMapAnalytics();
+            break;
+        case "v-an":
+            loadAnalysis();
+            break;
+    }
+}
+
+function refreshAll() {
+  // Dashboard — only reload the full KPIs/charts/map if that tab is actually open. Used to run
+  // unconditionally on every action regardless of which tab you were looking at (the actual
+  // "why is stuff loading that I'm not even on" cost) — the only thing anyone needed from it
+  // app-wide was the Follow-ups badge count, which now has its own light-weight call below.
+  const dash = document.getElementById("v-dash");
+  if (dash && dash.classList.contains("active")) {
+    loadDash();
+    loadCallDashboard();
+  }
+  google.script.run.withSuccessHandler(function(d){
+    updateFuBadge(d.overdue||0, d.dueToday||0);
+  }).withFailureHandler(function(){}).getFollowUpBadgeCounts(AUTH_TOKEN);
+
+  // Followups — only fetch the full overdue/today/upcoming lists if that tab is actually open
+  const fu = document.getElementById("v-fu");
+  if (fu && fu.classList.contains("active")) {
+    loadFollowups();
+  }
+
+  // Pipeline (agar page open hai)
+  const pipe = document.getElementById("v-pipe");
+  if (pipe && pipe.classList.contains("active")) {
+    loadPipe();
+  }
+
+  // Available Leads (agar page open hai)
+  const avail = document.getElementById("v-avail");
+  if (avail && avail.classList.contains("active")) {
+    loadAvailableLeads();
+  }
+
+  // Customers
+  const cust = document.getElementById("v-cust");
+  if (cust && cust.classList.contains("active")) {
+    loadCustomers();
+  }
+
+  // Reports
+  const rep = document.getElementById("v-rep");
+  if (rep && rep.classList.contains("active")) {
+    loadReports();
+  }
+
+  // Team Performance
+  const team = document.getElementById("v-team");
+  if (team && team.classList.contains("active")) {
+    loadTeamPerformance();
+  }
+
+  // Users
+  const users = document.getElementById("v-users");
+  if (users && users.classList.contains("active")) {
+    loadUsers();
+  }
+
+  // Pending Approvals — small sheet, cheap enough to refresh (and its badge) on every action
+  loadPending();
+
+  toast("Data refreshed successfully");
+}
+
+let pipeSearchTimer = null;
+
+function schedulePipeSearch() {
+  clearTimeout(pipeSearchTimer);
+  pipeSearchTimer = setTimeout(function () {
+    loadPipe();
+  }, 350);
+}
+
+function clearPipeFilters(){
+  [
+    "fq",
+    "fStage",
+    "fPriority",
+    "fFollow",
+    "fLead",
+    "fSource",
+    "fCity",
+    "fState",
+    "fCompany",
+    "fDateFrom",
+    "fDateTo"
+  ].forEach(function(id){
+    var el = document.getElementById(id);
+    if(el) el.value = "";
+  });
+  PIPE_EXTRA_FILTER = null;
+
+  loadPipe();
+}
+</script>

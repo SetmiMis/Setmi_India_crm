@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!-- APEXCHARTS CDN -->
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+<!-- LEAFLET + OPENSTREETMAP — real map tiles for both the Dashboard's India map and the MAP
+     Analytics tab's Map View (matches the Vercel app's look; replaces the old flat-cartoon
+     Google GeoChart everywhere, which had no tiles/terrain, just solid shapes) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<?!= include('css'); ?>
+</head>
+<body>
+
+<!-- LOGIN GATE — per-user login by default, PIN kept as a shared break-glass fallback -->
+<div class="gate" id="gate" style="display:none">
+  <div class="logo">SETMI <span class="in">INDIA</span></div>
+  <div class="tagline">Sales / Enquiry-to-Order FMS</div>
+  <div class="card gatebox">
+    <div id="loginBlock">
+      <label>Username</label>
+      <input id="loginUser" type="text" autocomplete="username" placeholder="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+      <label style="margin-top:10px">Password</label>
+      <div class="pwfield">
+        <input id="loginPass" type="password" autocomplete="current-password" placeholder="Password" onkeydown="if(event.key==='Enter')tryLogin()">
+        <button type="button" class="pw-eye" onclick="togglePasswordVisibility()" aria-label="Show password">👁</button>
+      </div>
+      <div id="loginErr" class="sub" style="color:var(--red);margin-top:8px"></div>
+      <button class="btn" onclick="tryLogin()" style="width:100%;margin-top:12px">Sign in</button>
+      <div class="sub" style="margin-top:10px"><a href="#" onclick="showPinGate();return false;">Use the shared admin PIN instead</a></div>
+      <div class="sub" style="margin-top:6px"><a href="#" onclick="showForgotGate();return false;">Forgot password?</a></div>
+    </div>
+    <div id="pinBlock" class="hidden">
+      <label>Enter Admin PIN</label>
+      <div class="pinwrap">
+        <input id="pinInput" type="password" inputmode="numeric" placeholder="PIN" onkeydown="if(event.key==='Enter')tryPin()">
+        <button class="btn" onclick="tryPin()">Unlock</button>
+      </div>
+      <div id="pinErr" class="sub" style="color:var(--red);margin-top:8px"></div>
+      <div class="sub" style="margin-top:10px"><a href="#" onclick="showLoginGate();return false;">Sign in with username instead</a></div>
+    </div>
+    <div id="forgotBlock" class="hidden">
+      <p class="sub" style="text-align:left;margin-bottom:12px">Enter your username — your admin will be notified to reset your password.</p>
+      <label>Username</label>
+      <input id="forgotUser" type="text" autocomplete="username" placeholder="username" onkeydown="if(event.key==='Enter')tryForgot()">
+      <div id="forgotErr" class="sub" style="color:var(--red);margin-top:8px"></div>
+      <div id="forgotOk" class="sub" style="color:var(--green);margin-top:8px"></div>
+      <button class="btn" onclick="tryForgot()" style="width:100%;margin-top:12px">Notify admin</button>
+      <div class="sub" style="margin-top:10px"><a href="#" onclick="showLoginGate();return false;">Back to sign in</a></div>
+    </div>
+  </div>
+</div>
+<script>
+  // The gate starts display:none (set inline above) so a logged-in user doesn't see the login
+  // form flash before restoreSession_() (app.js.html, runs later once all scripts load) gets a
+  // chance to verify their saved session with the server. Runs synchronously as the parser hits
+  // this point, before the browser paints anything below it. If there's no saved session at all,
+  // show the gate right away instead of waiting on scripts further down the page to load.
+  (function(){
+    var show = true;
+    try{ show = !localStorage.getItem('fms_session'); }catch(e){}
+    if (show) document.getElementById('gate').style.display = '';
+  })();
+</script>
+
+<!-- APP -->
+<div id="app" class="hidden">
+  <div class="topbar">
+    <div class="head">
+      <div style="display:flex;align-items:center;gap:6px">
+        <button class="btn ghost sidebarToggle" onclick="toggleSidebar()" title="Menu" aria-label="Menu">☰</button>
+        <div>
+          <div class="logo">SETMI <span class="in">INDIA</span></div>
+          <div class="tagline">Sales FMS · <span id="asOf"></span></div>
+        </div>
+      </div>
+      <div class="head-actions">
+        <button class="btn ghost sm" onclick="copyEnqLink()">📋 Field Link</button>
+        <div class="themeToggle" id="themeToggle" onclick="toggleTheme()" title="Toggle dark / light"><div class="knob" id="knob">☀</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sidebarBackdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
+  <div class="tabs" id="sidebarNav">
+    <div class="sidebarHead">
+      <span class="sub" style="font-weight:700;letter-spacing:.04em">MENU</span>
+      <button class="btn ghost sm" onclick="closeSidebar()" title="Close" aria-label="Close">✕</button>
+    </div>
+    <div class="tab active" onclick="showTab(this,'v-dash')">Dashboard</div>
+    <div class="tab" onclick="showTab(this,'v-fu')">Follow-ups <span id="fuBadge"></span></div>
+    <div class="tab" onclick="showTab(this,'v-avail')">Available Leads</div>
+    <div class="tab" onclick="showTab(this,'v-pipe')">Pipeline</div>
+    <div class="tab" onclick="showTab(this,'v-cust')">Customers</div>
+    <div class="tab" onclick="showTab(this,'v-new')">+ New Enquiry</div>
+    <div class="tab" onclick="showTab(this,'v-pend')">Pending Approvals <span id="pendBadge"></span></div>
+    <div class="tab admin-only" onclick="showTab(this,'v-rep')">Reports</div>
+    <div class="tab admin-only" onclick="showTab(this,'v-team')">Team Performance</div>
+    <div class="tab admin-only" onclick="showTab(this,'v-users')">Users</div>
+    <div class="tab" onclick="showTab(this,'v-map')">MAP Analytics</div>
+    <div class="tab" onclick="showTab(this,'v-an')">📊 Data Analysis</div>
+    <div class="tab" onclick="showTab(this,'v-how')">❓ How it Works</div>
+
+    <div style="margin-top:auto;padding-top:14px;border-top:1px solid var(--line)">
+      <div class="sub" id="sidebarUserName" style="padding:0 14px 8px;font-weight:700"></div>
+      <div class="tab" onclick="closeSidebar();changePasswordForm()">🔑 Change Password</div>
+      <div class="tab" onclick="logout()">🚪 Logout</div>
+    </div>
+  </div>
+
+  <div class="wrap">
+
+    <!-- DASHBOARD -->
+    <div id="v-dash" class="view active">
+      <!-- DASHBOARD FILTERS (collapsed by default so the dashboard opens straight into the numbers) -->
+    <div class="card" style="margin-bottom: 18px; padding: 12px 18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleDashFilters()">
+        <h3 class="sectitle" style="margin:0;font-size:14px">🔍 Filters</h3>
+        <span id="dashFilterToggleIcon" class="sub" style="font-size:16px">▾</span>
+      </div>
+      <div class="filters hidden" id="dashFiltersBody" style="margin-top:14px;margin-bottom: 0;">
+        <div><label>Date From</label><input type="date" id="dFilterFrom" onchange="refreshDashboard()"></div>
+        <div><label>Date To</label><input type="date" id="dFilterTo" onchange="refreshDashboard()"></div>
+        <div><label>Lead By</label><select id="dFilterLead" onchange="refreshDashboard()"><option value="">All</option></select></div>
+        <div><label>Source</label><select id="dFilterSource" onchange="refreshDashboard()"><option value="">All</option></select></div>
+        <div><label>Priority</label><select id="dFilterPri" onchange="refreshDashboard()">
+          <option value="">All</option><option>Hot</option><option>Warm</option><option>Cold</option>
+        </select></div>
+        <div><label>Stage</label><select id="dFilterStage" onchange="refreshDashboard()"><option value="">All</option></select></div>
+        <div style="display:flex; align-items:end; gap: 8px;">
+          <button class="btn ghost" onclick="resetDashFilters()" style="margin-top:0; padding: 10px;">✕ Clear</button>
+          <button class="btn" onclick="refreshDashboard()" style="margin-top:0; padding: 10px;">🔄 Refresh</button>
+        </div>
+      </div>
+    </div>
+      <div class="kpis" id="kpis"></div>
+
+      <div class="card" style="margin-bottom:18px">
+        <h3 class="sectitle">📞 Call Activity (Today)</h3>
+        <div class="kpis" id="callKpis"></div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h3 class="sectitle">Pipeline Funnel</h3>
+          <div class="funnel" id="funnel"></div>
+        </div>
+        <div class="card">
+          <h3 class="sectitle">Action Centre</h3>
+          <div class="sub" style="margin:-6px 0 10px">Overdue + due-today follow-ups. Clear these daily to plug the leak.</div>
+          <div id="actionMini"></div>
+        </div>
+      </div>
+
+  <!-- CHARTS SECTION -->
+      <div class="card" style="margin-bottom:18px">
+          <h3 class="sectitle">📈 Monthly Enquiry Trend</h3>
+          <div id="chartMonth" style="height:250px"></div>
+      </div>
+      <div class="chart-grid-3">
+          <div class="card">
+              <h3 class="sectitle">📊 Lead Sources</h3>
+              <div id="chartSource" style="height:240px"></div>
+          </div>
+          <div class="card">
+              <h3 class="sectitle">🔥 Lead Quality</h3>
+              <div id="chartPriority" style="height:240px"></div>
+          </div>
+          <div class="card">
+              <h3 class="sectitle">👨 Sales Team Performance</h3>
+              <div id="chartLeadBy" style="height:240px"></div>
+          </div>
+      </div>
+
+      <!-- REGIONAL PERFORMANCE (MAP + TABLE) -->
+      <div class="grid2" style="margin-bottom: 20px;">
+          <div class="card">
+              <h3 class="sectitle">📍 State-wise Performance</h3>
+              <div class="sub" style="margin-top:-6px; margin-bottom:10px;">Click on any state to filter the table</div>
+              <div id="indiaMap" style="height: 280px; width: 100%;"></div>
+          </div>
+          <div class="card">
+              <h3 class="sectitle">📋 Regional Data</h3>
+              <div class="sub" id="regionLabel" style="margin-top:-6px; margin-bottom:10px;">Showing All States</div>
+              <div class="tablecard" id="regionTable" style="height: 280px;">
+                  <div class="empty">Loading map data...</div>
+              </div>
+          </div>
+      </div>
+
+      <!-- WON CUSTOMERS — name + phone of every Won / Dispatched / Closed enquiry (login only; reps see their own) -->
+      <div class="card" style="margin-top:18px">
+        <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
+          <h3 class="sectitle" style="margin:0">🏆 Won Customers <span class="sub" id="wonCount"></span></h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="search" id="wonSearch" placeholder="Search name, phone, product, state…" oninput="renderWonCustomers()" style="min-width:240px">
+            <button class="btn ghost sm" onclick="anCustomers_()">⬇ CSV</button>
+          </div>
+        </div>
+        <div class="tablecard" id="wonTable" style="max-height:420px;overflow:auto"><div class="empty">Loading…</div></div>
+      </div>
+    </div>
+
+
+    <!-- FOLLOW-UPS -->
+    <div id="v-fu" class="view">
+      <div class="card">
+        <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:14px;margin-bottom:15px;">
+          <div>
+            <h2 class="sectitle" id="fuSectionTitle" style="margin:0">⚠ Overdue</h2>
+            <div class="sub" id="fuSectionSub">Showing 0</div>
+          </div>
+          <div style="min-width:220px">
+            <label>Show</label>
+            <select id="fuFilter" onchange="fuSwitchSection()">
+              <option value="overdue">⚠ Overdue</option>
+              <option value="today">● Due Today</option>
+              <option value="upcoming">Upcoming</option>
+            </select>
+          </div>
+        </div>
+        <div id="fuList" class="tablecard"></div>
+      </div>
+    </div>
+
+    <!-- AVAILABLE LEADS -->
+    <div id="v-avail" class="view">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:15px;">
+          <div>
+            <h2 class="sectitle" style="margin:0">Available Leads</h2>
+            <div class="sub">Unclaimed open enquiries. Claim one to make it yours — like accepting an order.</div>
+          </div>
+          <button class="btn ghost sm" id="importMetaBtn" onclick="importMetaLeadsNow_()">🔄 Import Meta Ads Leads</button>
+        </div>
+        <div style="margin-bottom:15px;">
+          <div style="max-width:320px"><input id="availSearch" placeholder="🔍 Search customer / phone / requirement…" oninput="renderAvail()"></div>
+          <div class="sub" id="availCount">Showing 0</div>
+        </div>
+        <div id="availList"></div>
+      </div>
+    </div>
+
+  <!-- ===================== PIPELINE ===================== -->
+<div id="v-pipe" class="view">
+  <div class="card hidden" id="transferReqCard" style="margin-bottom:18px">
+    <h3 class="sectitle">Transfer Requests</h3>
+    <div class="sub" style="margin:-6px 0 10px">Leads other reps want to hand you — accept to make them yours.</div>
+    <div id="transferReqList"></div>
+  </div>
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;margin-bottom:15px;">
+      <div>
+        <h2 class="sectitle">Sales Pipeline</h2>
+        <div id="pipeCount" class="sub">Showing 0 Enquiries</div>
+      </div>
+      <div class="actions">
+        <button class="btn ghost" onclick="clearPipeFilters()">Clear Filters</button>
+        <button class="btn ghost" onclick="printPipeline()">🖨️ Print</button>
+        <button class="btn" onclick="exportPipeline()">⬇️ Export CSV</button>
+      </div>
+    </div>
+
+    <div id="pipeExtraFilterBadge" class="hidden" style="margin-bottom:12px"></div>
+
+    <!-- FILTERS -->
+    <div class="filters">
+      <div><label>Search</label><input id="fq" placeholder="Customer / Phone / Company" onkeyup="schedulePipeSearch()"></div>
+      <div><label>Stage</label><select id="fStage" onchange="loadPipe()"><option value="">All Stages</option></select></div>
+      <div><label>Priority</label><select id="fPriority" onchange="loadPipe()"><option value="">All</option><option>Hot</option><option>Warm</option><option>Cold</option></select></div>
+      <div><label>Follow-up</label><select id="fFollow" onchange="loadPipe()"><option value="">All</option><option value="Overdue">🔴 Overdue</option><option value="Today">🟠 Today</option><option value="Tomorrow">🟡 Tomorrow</option><option value="Upcoming">🟢 Upcoming</option><option value="No Follow-up">⚪ No Follow-up</option></select></div>
+      <div><label>Lead By</label><select id="fLead" onchange="loadPipe()"><option value="">All</option></select></div>
+      <div><label>Source</label><select id="fSource" onchange="loadPipe()"><option value="">All</option></select></div>
+      <div><label>City</label><input id="fCity" onkeyup="schedulePipeSearch()"></div>
+      <div><label>State</label><input id="fState" onkeyup="schedulePipeSearch()"></div>
+      <div><label>Company</label><input id="fCompany" onkeyup="schedulePipeSearch()"></div>
+      <div><label>Date From</label><input id="fDateFrom" type="date" onchange="loadPipe()"></div>
+      <div><label>Date To</label><input id="fDateTo" type="date" onchange="loadPipe()"></div>
+    </div>
+
+    <div style="margin-top:20px">
+      <div id="pipeTable">
+        <div class="empty">Loading...</div>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- =================== END PIPELINE =================== -->
+
+    <!-- CUSTOMERS -->
+    <div id="v-cust" class="view">
+      <div class="grid2" style="grid-template-columns:1.6fr 1fr">
+        <div class="card">
+          <div id="custTable"></div>
+        </div>
+        <div>
+          <div class="card" style="margin-bottom:14px">
+            <h3 class="sectitle">Add Customer</h3>
+            <label>Name *</label><input id="cName">
+            <div style="height:8px"></div><label>Company</label><input id="cComp">
+            <div style="height:8px"></div><label>Phone *</label><input id="cPhone" inputmode="tel">
+            <div class="grid2" style="margin-top:8px">
+              <div><label>City</label><input id="cCity"></div>
+              <div><label>Email</label><input id="cEmail"></div>
+            </div>
+            <div class="grid2" style="margin-top:8px">
+              <div><label>GST No.</label><input id="cGST"></div>
+              <div><label>Pincode</label><input id="cPincode" maxlength="6" inputmode="numeric"></div>
+            </div>
+            <div class="grid2" style="margin-top:8px">
+              <div><label>District</label><input id="cDistrict"></div>
+              <div><label>State</label><input id="cState"></div>
+            </div>
+            <div style="margin-top:12px"><button class="btn green sm" id="cSave" onclick="saveCustomer()">Save Customer</button></div>
+          </div>
+          <div class="card admin-only">
+            <h3 class="sectitle">Lead By — Team</h3>
+            <div class="sub" style="margin:-6px 0 8px">Add or remove who attends customers.</div>
+            <div style="display:flex;gap:8px"><input id="newLead" placeholder="Add name"><button class="btn sm" onclick="addLead()">Add</button></div>
+            <div class="chiprow" id="teamChips"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- HOW IT WORKS -->
+    <div id="v-how" class="view">
+      <div style="margin-bottom:16px">
+        <h2 class="sectitle" style="margin:0">How it Works</h2>
+        <div class="sub">Ek enquiry system mein aane se close hone tak kaise chalti hai — naye team member ke liye.</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div class="card" style="display:flex;gap:14px;align-items:flex-start">
+          <div class="howStepNum">1</div>
+          <div><div class="sectitle" style="margin:0">Enquiry aati hai</div>
+            <p class="sub" style="margin-top:4px">Teen tareeke: New Enquiry tab se staff khud daalta hai, public Field Link se koi bhi bhejta hai, ya Bulk Import se ek saath CSV/Excel upload hoti hai.</p></div>
+        </div>
+        <div class="card" style="display:flex;gap:14px;align-items:flex-start">
+          <div class="howStepNum">2</div>
+          <div><div class="sectitle" style="margin:0">Review — Pending Approvals</div>
+            <p class="sub" style="margin-top:4px">Teeno tareeke pehle Pending Approvals mein jaate hain, kyunki inmein data galat/adhura ho sakta hai — ek baar dekh kar Approve karna padta hai. Approve hote hi enquiry Available Leads mein chali jaati hai.</p></div>
+        </div>
+        <div class="card" style="display:flex;gap:14px;align-items:flex-start">
+          <div class="howStepNum">3</div>
+          <div><div class="sectitle" style="margin:0">Claim — jaise order accept karna</div>
+            <p class="sub" style="margin-top:4px">Available Leads mein sabko unclaimed leads dikhte hain. Koi bhi rep lead ko "Call &amp; Claim" dabata hai — ek hi popup mein call bhi ho jaati hai aur Priority set karke Claim bhi. Lead automatically usi rep ke naam ho jaata hai — kisi ko manually assign nahi karna padta.</p></div>
+        </div>
+        <div class="card" style="display:flex;gap:14px;align-items:flex-start">
+          <div class="howStepNum">4</div>
+          <div><div class="sectitle" style="margin:0">Pipeline mein follow-up</div>
+            <p class="sub" style="margin-top:4px">Claim hone ke baad lead Pipeline mein dikhta hai. Priority ke hisaab se agli follow-up date apne aap ban jaati hai (Hot jaldi, Cold der se). Follow-ups tab par roz ke overdue/due-today leads dikhte hain.</p></div>
+        </div>
+        <div class="card" style="display:flex;gap:14px;align-items:flex-start">
+          <div class="howStepNum">5</div>
+          <div><div class="sectitle" style="margin:0">Won / Lost / Dispatched</div>
+            <p class="sub" style="margin-top:4px">Deal final hone par Stage badal do — Won, Dispatched, Closed (sab "converted" count hote hain), ya Lost.</p></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="sectitle">Yaad rakhein</div>
+        <ul class="sub" style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px">
+          <li>Lead khud se kisi ko assign nahi hota — jo call karke claim karega, wahi owner banega.</li>
+          <li>Priority call ke baad hi set hoti hai — isi liye claim step mein hi priority + call log ek saath hai.</li>
+          <li>Pending Approvals sirf un leads ke liye hai jinka data pehle verify karna zaroori hai (manual entry / Field Link / Bulk Import).</li>
+          <li>Rep sirf apni khud ki leads dekh/edit kar sakta hai (Pipeline, Follow-ups) — Reports, Team Performance aur Users sirf Admin ko dikhte hain.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- NEW ENQUIRY -->
+    <div id="v-new" class="view">
+      <div class="card" style="max-width:760px">
+        <h3 class="sectitle">Capture New Enquiry</h3>
+        <div id="nDupWarning" class="dup-warning hidden"></div>
+
+        <div class="form-section">
+          <h4 class="form-subtitle">Contact Details</h4>
+          <div class="grid2">
+            <div><label>Customer Name *</label><input id="nCust"></div>
+            <div><label>Company</label><input id="nComp"></div>
+            <div><label>Phone *</label><input id="nPhone" inputmode="tel" onblur="onNPhoneBlur()"></div>
+            <div><label>Email</label><input id="nEmail" onblur="validateNField('nEmail')"></div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h4 class="form-subtitle">Address &amp; Tax</h4>
+          <div class="grid2">
+            <div><label>GST No.</label><input id="nGST" onblur="validateNField('nGST')"></div>
+            <div><label>Pincode</label><input id="nPincode" maxlength="6" inputmode="numeric" onkeyup="fetchPincodeMain()" onblur="validateNField('nPincode')"></div>
+            <div><label>District</label><input id="nDistrict" readonly></div>
+            <div><label>State</label><input id="nState" readonly></div>
+            <div><label>City / Area</label><select id="nCity"><option value="">-- Select Area --</option></select></div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h4 class="form-subtitle">Sales Details</h4>
+          <div class="grid2">
+            <div><label>Source</label><select id="nSource"></select></div>
+            <div><label>Priority</label><select id="nPri"></select></div>
+            <div><label>Lead By</label><select id="nLead"></select></div>
+            <div><label>Next Follow-up</label><input id="nNext" type="date"></div>
+          </div>
+          <div class="grid2" style="margin-top:10px"><div><label>Order Qty (metres)</label><input id="nQty" type="number" min="0" inputmode="decimal"></div><div><label>Timeline</label><select id="nTimeline"></select></div></div>
+          <div style="margin-top:10px"><label>Requirement / Products</label><textarea id="nReq" rows="2" placeholder="e.g. SP-series IP68 connectors, 200 pcs"></textarea></div>
+          <div style="margin-top:10px"><label>Notes</label><textarea id="nNotes" rows="2"></textarea></div>
+        </div>
+
+        <div class="form-section">
+          <label>Attach Document (PDF) — optional, e.g. a quotation, PO, or spec sheet — max 10 MB</label>
+          <input type="file" id="nDoc" accept="application/pdf" onchange="handleNDocSelect(this)">
+          <div id="nDocPreview" class="sub" style="margin-top:6px"></div>
+        </div>
+
+        <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
+          <button class="btn green" id="nSave" onclick="saveEnq()">Save Enquiry</button>
+          <span class="sub" id="nSaveHint">Goes to Pending Approvals for review before it joins the pipeline.</span>
+        </div>
+      </div>
+
+      <div class="card" style="max-width:760px;margin-top:16px">
+        <h3 class="sectitle">📊 Bulk Import from CSV / Excel</h3>
+        <div class="sub" style="margin:-6px 0 10px">CSV or Excel export of a lead list (e.g. from IndiaMART) — match the columns below, remove any rows you don't want, then import. Each row becomes its own draft in Pending Approvals for you to review.</div>
+        <div class="actions" style="margin-bottom:10px">
+          <button class="btn ghost sm" onclick="downloadBulkTemplate()">⬇️ Download Template</button>
+        </div>
+        <input type="file" id="bulkFile" accept=".csv,.xlsx,.xls" onchange="handleBulkFileSelect(this)">
+        <div id="bulkColumnMap" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <!-- PENDING APPROVALS — manual submissions only (New Enquiry / Field Link / Bulk Import); Meta
+         Ads leads bypass this entirely and land straight on Available Leads (see that tab). -->
+    <div id="v-pend" class="view">
+      <div class="card">
+        <h3 class="sectitle" style="margin:0">Pending Approvals</h3>
+        <div class="sub">Manually submitted leads land here first — approve to add them to the pipeline, or reject to discard.</div>
+        <div id="pendList" style="margin-top:10px"><div class="empty">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- REPORTS -->
+    <div id="v-rep" class="view">
+      <div style="margin-bottom:12px"><button class="btn ghost sm" id="repExportBtn" onclick="exportReport()">⬇ Export snapshot to a sheet</button></div>
+      <div class="grid2">
+        <div class="card"><h3 class="sectitle">By Source</h3><div id="repSource"></div></div>
+        <div class="card"><h3 class="sectitle">By Lead By</h3><div id="repLead"></div></div>
+      </div>
+    </div>
+
+    <!-- DATA ANALYSIS (built by analysis.js.html) -->
+    <div id="v-an" class="view"></div>
+
+    <!-- TEAM PERFORMANCE -->
+    <div id="v-team" class="view">
+      <div style="margin-bottom:12px">
+        <h2 class="sectitle" style="margin:0">Team Performance</h2>
+        <div class="sub">Per-rep activity from the Sheet — leads owned, calls, follow-ups, conversions. <span id="teamPerfAsOf"></span></div>
+      </div>
+      <div class="kpis" id="teamPerfKpis" style="margin-bottom:18px"></div>
+      <div class="card">
+        <h3 class="sectitle">Leaderboard</h3>
+        <div id="teamPerfTable"></div>
+      </div>
+    </div>
+
+    <!-- USERS -->
+    <div id="v-users" class="view">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;flex-wrap:wrap;gap:10px">
+          <div>
+            <h2 class="sectitle" style="margin:0">Users</h2>
+            <div class="sub">Add reps/admins, toggle roles, activate or deactivate — without touching the Sheet.</div>
+          </div>
+          <button class="btn sm" onclick="addUserForm()">+ Add User</button>
+        </div>
+        <div id="usersTable"></div>
+      </div>
+    </div>
+
+    <!-- MAP ANALYTICS -->
+    <div id="v-map" class="view">
+      <div class="card" style="margin-bottom:18px">
+        <h3 class="sectitle">🗺 Live Enquiry Analytics</h3>
+        <div class="kpis" id="mapKpis"></div>
+      </div>
+
+      <div class="card" style="margin-bottom:18px">
+        <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;">
+          <h3 class="sectitle" style="margin:0">🗺 Map View</h3>
+          <button class="btn ghost sm hidden" id="mapZoomOutBtn" onclick="drillUpToStates_()">✕ Clear Selection</button>
+        </div>
+        <div class="sub" style="margin-bottom:10px">Click a state on the map (or in the table below) to highlight it in gold. The map only shows states — district and area breakdowns appear in the table below, not on the map itself.</div>
+        <div id="mapViewChart" style="height:420px;width:100%"></div>
+        <div class="sub" id="mapDrillCrumb" style="margin:14px 0 8px"></div>
+        <div class="tablecard" id="mapDrillTable" style="height:280px"><div class="empty">Loading map data...</div></div>
+      </div>
+
+      <div class="chart-grid-3">
+        <div class="card"><h3 class="sectitle">📍 Enquiries by Zone</h3><div id="chartZonePie" style="height:260px"></div></div>
+        <div class="card" style="grid-column:span 2"><h3 class="sectitle">📊 Top States by Enquiries</h3><div id="chartStateBar" style="height:300px"></div></div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:14px;margin-bottom:15px;">
+          <h3 class="sectitle" style="margin:0" id="mapMetricTitle">🏆 Top Performing Zones</h3>
+          <div style="min-width:220px">
+            <label>Show</label>
+            <select id="mapMetricFilter" onchange="renderMapMetricTable_()">
+              <option value="topZones">🏆 Top Performing Zones</option>
+              <option value="lowestZones">📉 Lowest Performing Zones</option>
+              <option value="byState">By State</option>
+              <option value="byDistrict">By District</option>
+              <option value="byZone">By Zone</option>
+              <option value="bySource">By Source</option>
+              <option value="zoneIn">Zone In (Converted)</option>
+              <option value="zoneOut">Zone Out (Lost)</option>
+            </select>
+          </div>
+        </div>
+        <div class="tablecard" id="mapMetricTable"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div id="modalBg" class="modal-bg hidden" onclick="if(event.target===this)closeModal()">
+  <div class="card modal" id="modalBody"></div>
+</div>
+
+<script>
+var META={}, CURRENT=null, CUST_CACHE=[], THEME='light', AUTH_TOKEN='', CURRENT_USER=null;
+
+/* GATE */
+google.script.run.withSuccessHandler(function(m){
+    META=m;
+
+    // Populate Dashboard Filters
+    const opts = function(arr) { return '<option value="">All</option>' + arr.map(function(x){return '<option>'+x+'</option>'}).join(''); };
+    if(document.getElementById('dFilterLead')) document.getElementById('dFilterLead').innerHTML = opts(m.team || []);
+    if(document.getElementById('dFilterSource')) document.getElementById('dFilterSource').innerHTML = opts(m.sources || []);
+    if(document.getElementById('dFilterStage')) document.getElementById('dFilterStage').innerHTML = opts(m.stages || []);
+
+    // restoreSession_()'s whoAmI() call (Index.html auto-login on a saved session) races this
+    // getConfigMeta() call — whichever resolves first. If whoAmI wins, openApp()->fillSelects()
+    // already ran with META still {}, so every META-driven dropdown (Pipeline's Stage/Source/
+    // Lead By filters, New Enquiry's Source/Priority/Lead By) rendered with only its placeholder
+    // option and nothing else — silently, since fillSelects()'s opts() just maps an empty array.
+    // Re-running it here once META is actually populated fixes that regardless of which call wins.
+    if (typeof fillSelects === 'function') fillSelects();
+
+    if(!m.pinRequired) openApp();
+}).getConfigMeta();
+</script>
+
+<?!= include('utils.js'); ?>
+<?!= include('dataTable.js'); ?>
+<?!= include('app.js'); ?>
+<?!= include('dashboard.js'); ?>
+<?!= include('dashboardCharts.js'); ?> <!-- NAYI FILE INCLUDE HOGI YAHAN -->
+<?!= include('availableLeads.js'); ?>
+<?!= include('pipeline.js'); ?>
+<?!= include('customer.js'); ?>
+<?!= include('followup.js'); ?>
+<?!= include('reports.js'); ?>
+<?!= include('teamPerformance.js'); ?>
+<?!= include('users.js'); ?>
+<?!= include('modal.js'); ?>
+<?!= include("newEnquiry.js"); ?>
+<?!= include("pending.js"); ?>
+<?!= include("bulkImport.js"); ?>
+<?!= include("callLog.js"); ?>
+<?!= include("omsOrder.js"); ?>
+<?!= include("mapAnalytics.js"); ?>
+<?!= include("analysis.js"); ?>
+<script>restoreSession_();</script>
+</body>
+</html>
