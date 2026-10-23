@@ -40,6 +40,48 @@ jobs:
       - name: Unit + contract tests
         run: npm test
 
+  web:
+    name: New CRM (web/) — lint, types, unit + database/RLS tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Reference data is in sync with the legacy source
+        run: |
+          npm run gen:reference
+          git diff --exit-code -- ../supabase/seed src/lib/geo
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Database tests (migrations, RLS allow/deny, workflows, data migration) on PGlite
+        run: npm run test:db
+
+      - name: Production build
+        run: npm run build
+
+      - name: Dependency audit (high/critical, production deps)
+        run: npm audit --omit=dev --audit-level=high
+
   gitleaks:
     name: Secret scan (gitleaks, full history)
     runs-on: ubuntu-latest
