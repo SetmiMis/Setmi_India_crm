@@ -18,7 +18,11 @@ const rules = [
   [/\bgh[pousr]_[A-Za-z0-9]{36,}\b/, 'GitHub token'],
   [/\bAIza[0-9A-Za-z_-]{35}\b/, 'Google API key'],
   [/\bya29\.[0-9A-Za-z_-]{20,}/, 'Google OAuth access token'],
-  [/"refresh_token"\s*:\s*"[^"]+"/, 'OAuth refresh token (.clasprc.json?)']
+  [/"refresh_token"\s*:\s*"[^"]+"/, 'OAuth refresh token (.clasprc.json?)'],
+  // New CRM (web/): Supabase server keys and long-lived JWTs must never be committed.
+  [/\bsb_secret_[A-Za-z0-9_-]{20,}/, 'Supabase secret key'],
+  [/\beyJhbGciOi[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{40,}\.[A-Za-z0-9_-]{20,}/, 'JWT (service_role key?)'],
+  [/postgres(?:ql)?:\/\/[^:\s]+:[^@\s]{6,}@/, 'database URL with password']
 ];
 
 const files = execSync('git ls-files -co --exclude-standard', { cwd: ROOT }).toString().split('\n').filter(Boolean)

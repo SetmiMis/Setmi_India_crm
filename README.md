@@ -67,7 +67,7 @@ docs/                full technical documentation (index below)
 ## Prerequisites and local checks
 
 - Node.js 20+ (no npm dependencies)
-- `npm run ci` runs every check that CI runs: structure, syntax, secrets and tests.
+- `npm run ci` runs every check that CI runs: structure, syntax, secrets and tests (works on Windows too).
 - For syncing with Apps Script, use `@google/clasp`. Set it up **only after** reading
   [docs/13](docs/13_ENVIRONMENTS_AND_DEPLOYMENT.md). `.clasp.json` and `.clasprc.json` are gitignored.
 

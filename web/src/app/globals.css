@@ -1,0 +1,181 @@
+@import "tailwindcss";
+
+/* SETMI INDIA design tokens — extracted from the legacy UI (src/css.html, section 1). */
+:root {
+  --bg1: #eaf7fb;
+  --bg2: #d3ebf2;
+  --bg3: #bfe0eb;
+  --panel: rgba(255, 255, 255, 0.86);
+  --panel-solid: #ffffff;
+  --ink: #13384a;
+  --muted: #5d7c8a;
+  --line: rgba(19, 56, 74, 0.12);
+  --cyan: #0f9dc7;
+  --cyan-dk: #0b86ac;
+  --green: #54a737;
+  --green-dk: #3f8c2a;
+  --gold: #e0962a;
+  --red: #d9594a;
+  --blue: #3d8fcf;
+  --chip: rgba(19, 56, 74, 0.06);
+  --chrome: linear-gradient(180deg, #5e98b0, #2c5f73);
+  --shadow: 0 10px 30px rgba(20, 80, 110, 0.1);
+  --shadow-soft: 0 4px 14px rgba(20, 80, 110, 0.07);
+}
+
+:root[data-theme="dark"] {
+  --bg1: #0a1525;
+  --bg2: #08101d;
+  --bg3: #060c16;
+  --panel: rgba(18, 33, 54, 0.9);
+  --panel-solid: #0e1c30;
+  --ink: #e6f1fb;
+  --muted: #8fb0cc;
+  --line: rgba(120, 170, 210, 0.16);
+  --cyan: #39c2ec;
+  --cyan-dk: #1aa0cf;
+  --green: #74d96a;
+  --green-dk: #57bf4d;
+  --gold: #f0b54a;
+  --red: #ef6a55;
+  --blue: #5aa6e0;
+  --chip: rgba(140, 190, 230, 0.12);
+  --chrome: linear-gradient(180deg, #eaf4ff, #9db8d0);
+  --shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
+  --shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-panel: var(--panel-solid);
+  --color-chip: var(--chip);
+  --color-cyan: var(--cyan);
+  --color-cyan-dk: var(--cyan-dk);
+  --color-green: var(--green);
+  --color-green-dk: var(--green-dk);
+  --color-gold: var(--gold);
+  --color-red: var(--red);
+  --color-blue: var(--blue);
+  --font-sans: "Plus Jakarta Sans Variable", system-ui, sans-serif;
+  --font-display: "Chakra Petch", "Plus Jakarta Sans Variable", sans-serif;
+  --radius-card: 16px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light;
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+body {
+  color: var(--ink);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 10% 10%, rgba(15, 157, 199, 0.1), transparent 18%),
+    radial-gradient(circle at 92% 88%, rgba(84, 167, 55, 0.09), transparent 20%),
+    linear-gradient(158deg, var(--bg1) 0%, var(--bg2) 48%, var(--bg3) 100%);
+  background-attachment: fixed;
+}
+
+.logo {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  background: var(--chrome);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.logo .in {
+  color: var(--green);
+  -webkit-text-fill-color: var(--green);
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(8px);
+}
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.input {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--panel-solid);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 8px 11px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.input:focus {
+  outline: 2px solid color-mix(in srgb, var(--cyan) 55%, transparent);
+  outline-offset: 1px;
+  border-color: var(--cyan);
+}
+.input[aria-invalid="true"] {
+  border-color: var(--red);
+}
+
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+table.data th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  background: var(--panel-solid);
+}
+table.data td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+table.data tbody tr:hover {
+  background: var(--chip);
+}
+
+/* Leaflet needs its own CSS; served from node_modules via the map component import. */
+.leaflet-container {
+  font: inherit;
+  border-radius: 14px;
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+  nav,
+  .no-print {
+    display: none !important;
+  }
+}

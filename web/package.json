@@ -1,0 +1,59 @@
+{
+  "name": "setmi-crm-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build && node scripts/copy-standalone-assets.mjs",
+    "start": "node .next/standalone/server.js",
+    "lint": "eslint src tests e2e",
+    "typecheck": "tsc --noEmit -p .",
+    "test:unit": "tsx --test tests/unit/*.test.ts",
+    "test:db": "tsx --test --test-concurrency=1 tests/db/*.test.ts",
+    "test": "npm run test:unit && npm run test:db",
+    "gen:reference": "node scripts/generate-reference-data.mjs",
+    "ci": "npm run lint && npm run typecheck && npm test && npm run build",
+    "test:e2e": "playwright test",
+    "seed:reference": "tsx --env-file=.env.local scripts/seed-reference.ts",
+    "e2e:accounts": "tsx --env-file=.env.local scripts/e2e-accounts.ts"
+  },
+  "dependencies": {
+    "@fontsource-variable/plus-jakarta-sans": "^5.3.0",
+    "@fontsource/chakra-petch": "^5.3.0",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.118.0",
+    "clsx": "^2.1.1",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^1.61.0",
+    "next": "16.4.2",
+    "nodemailer": "^10.2.1",
+    "papaparse": "^5.7.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "read-excel-file": "^9.3.12",
+    "server-only": "^0.0.1",
+    "tailwind-merge": "^3.7.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.11",
+    "@playwright/test": "^1.64.1",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/leaflet": "^1.9.22",
+    "@types/node": "^20",
+    "@types/nodemailer": "^8.0.2",
+    "@types/papaparse": "^5.5.2",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.2",
+    "pg": "^8.23.1",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.15",
+    "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=20.9"
+  }
+}
